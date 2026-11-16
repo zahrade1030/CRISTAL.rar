@@ -1,3 +1,4 @@
+
 package com.example.ui.screens.home
 
 import android.Manifest
@@ -82,7 +83,9 @@ fun HomeScreen(
     val isExpired = subActivated && nowMs >= subExpirationTime
     val remainingMs = (subExpirationTime - nowMs).coerceAtLeast(0L)
     val totalMs = (subDurationDays.toLong() * 24 * 3600 * 1000L).coerceAtLeast(1L)
-    val percentRemaining = ((remainingMs.toFloat() / totalMs.toFloat()) * 100f).coerceIn(0f, 100f)
+    val percentRemaining = (
+        (remainingMs.toFloat() / totalMs.toFloat()) * 100f
+    ).coerceIn(0f, 100f)
 
     var showExpiredNoticeDialog by remember { mutableStateOf(false) }
     var showSubRenewDialog by remember { mutableStateOf(false) }
@@ -119,15 +122,24 @@ fun HomeScreen(
     // Required permissions
     val requiredPermissions = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.READ_MEDIA_IMAGES)
+            arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.READ_MEDIA_IMAGES
+            )
         } else {
-            arrayOf(Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE)
+            arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
         }
     }
 
     val hasCameraPermission = remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
         )
     }
 
@@ -135,12 +147,18 @@ fun HomeScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
+        val cameraGranted =
+            permissions[Manifest.permission.CAMERA] ?: false
+
         hasCameraPermission.value = cameraGranted
+
         if (!cameraGranted) {
             Toast.makeText(
                 context,
-                if (isPersian) "برای گرفتن عکس با دوربین نیاز به مجوز دوربین است" else "Camera permission is required to capture photos",
+                if (isPersian)
+                    "برای گرفتن عکس با دوربین نیاز به مجوز دوربین است"
+                else
+                    "Camera permission is required to capture photos",
                 Toast.LENGTH_SHORT
             ).show()
         } else {
@@ -158,45 +176,71 @@ fun HomeScreen(
     // In-App Camera Capture Function using CameraX
     fun captureInAppPhoto(onCaptured: (() -> Unit)? = null) {
         val executor = ContextCompat.getMainExecutor(context)
-        imageCapture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
-            override fun onCaptureSuccess(image: ImageProxy) {
-                try {
-                    val rotationDegrees = image.imageInfo.rotationDegrees
-                    val planeProxy = image.planes[0]
-                    val buffer = planeProxy.buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    val originalBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    image.close()
 
-                    if (originalBitmap != null) {
-                        val bitmap = if (rotationDegrees != 0) {
-                            val matrix = android.graphics.Matrix()
-                            matrix.postRotate(rotationDegrees.toFloat())
-                            Bitmap.createBitmap(originalBitmap, 0, 0, originalBitmap.width, originalBitmap.height, matrix, true)
-                        } else {
-                            originalBitmap
+        imageCapture.takePicture(
+            executor,
+            object : ImageCapture.OnImageCapturedCallback() {
+
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    try {
+                        val rotationDegrees = image.imageInfo.rotationDegrees
+                        val planeProxy = image.planes[0]
+                        val buffer = planeProxy.buffer
+                        val bytes = ByteArray(buffer.remaining())
+                        buffer.get(bytes)
+
+                        val originalBitmap = BitmapFactory.decodeByteArray(
+                            bytes,
+                            0,
+                            bytes.size
+                        )
+
+                        image.close()
+
+                        if (originalBitmap != null) {
+                            val bitmap = if (rotationDegrees != 0) {
+                                val matrix = android.graphics.Matrix()
+                                matrix.postRotate(rotationDegrees.toFloat())
+
+                                Bitmap.createBitmap(
+                                    originalBitmap,
+                                    0,
+                                    0,
+                                    originalBitmap.width,
+                                    originalBitmap.height,
+                                    matrix,
+                                    true
+                                )
+                            } else {
+                                originalBitmap
+                            }
+
+                            val prepared = prepareBitmapPreservingAspect(bitmap)
+
+                            viewModel.setCapturedBitmap(prepared)
+                            isCameraActive = false
+                            onCaptured?.invoke()
                         }
-                        val prepared = prepareBitmapPreservingAspect(bitmap)
-                        viewModel.setCapturedBitmap(prepared)
-                        isCameraActive = false
-                        onCaptured?.invoke()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                        image.close()
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    image.close()
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    exception.printStackTrace()
+
+                    Toast.makeText(
+                        context,
+                        if (isPersian)
+                            "خطا در عکاسی: ${exception.localizedMessage}"
+                        else
+                            "Capture error: ${exception.localizedMessage}",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
-
-            override fun onError(exception: ImageCaptureException) {
-                exception.printStackTrace()
-                Toast.makeText(
-                    context,
-                    if (isPersian) "خطا در عکاسی: ${exception.localizedMessage}" else "Capture error: ${exception.localizedMessage}",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        })
+        )
     }
 
     fun openCamera() {
@@ -216,6 +260,7 @@ fun HomeScreen(
             try {
                 context.contentResolver.openInputStream(it)?.use { stream ->
                     val bmp = BitmapFactory.decodeStream(stream)
+
                     if (bmp != null) {
                         val prepared = prepareBitmapPreservingAspect(bmp)
                         viewModel.setCapturedBitmap(prepared)
@@ -234,37 +279,75 @@ fun HomeScreen(
                 title = {
                     Column {
                         Text(
-                            text = if (isPersian) "کریستال بین شکر" else "Crystal Sugar Vision",
+                            text = if (isPersian)
+                                "کریستال بین شکر"
+                            else
+                                "Crystal Sugar Vision",
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
                         )
+
                         Text(
-                            text = if (isPersian) "سامانه آنالیز آزمایشگاهی ICUMSA" else "Laboratory Sugar ICUMSA Classifier",
+                            text = if (isPersian)
+                                "سامانه آنالیز آزمایشگاهی ICUMSA"
+                            else
+                                "Laboratory Sugar ICUMSA Classifier",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { checkSubscriptionAndExecute { onNavigateToCalibration() } }) {
-                        Icon(Icons.Default.Tune, contentDescription = "Calibration")
+                    IconButton(
+                        onClick = {
+                            checkSubscriptionAndExecute {
+                                onNavigateToCalibration()
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = "Calibration"
+                        )
                     }
+
                     IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings"
+                        )
                     }
+
                     IconButton(onClick = onNavigateToAbout) {
-                        Icon(Icons.Default.Info, contentDescription = "About Team")
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = "About Team"
+                        )
                     }
+
                     if (isDevMode) {
-                        IconButton(onClick = { checkSubscriptionAndExecute { onNavigateToDevCenter() } }) {
-                            Icon(Icons.Default.Code, contentDescription = "Dev Center", tint = Color(0xFFF59E0B))
+                        IconButton(
+                            onClick = {
+                                checkSubscriptionAndExecute {
+                                    onNavigateToDevCenter()
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Code,
+                                contentDescription = "Dev Center",
+                                tint = Color(0xFFF59E0B)
+                            )
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { paddingValues ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -274,10 +357,12 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // Subscription Expiration Banner (Active Warning <= 10%)
+            // Subscription Expiration Banner
             if (subActivated && !isExpired && percentRemaining <= 10f) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF78350F)),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF78350F)
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -290,9 +375,17 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFBBF24))
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFFBBF24)
+                            )
+
                             Spacer(modifier = Modifier.width(8.dp))
-                            val remDays = (remainingMs / (1000 * 3600 * 24)).toInt()
+
+                            val remDays =
+                                (remainingMs / (1000 * 3600 * 24)).toInt()
+
                             Text(
                                 text = if (isPersian)
                                     "هشدار: اشتراک شما در حال اتمام است (باقیمانده: $remDays روز / ${percentRemaining.toInt()}٪). لطفاً نسبت به تمدید اقدام فرمایید."
@@ -302,14 +395,26 @@ fun HomeScreen(
                                 fontSize = 11.sp
                             )
                         }
+
                         Spacer(modifier = Modifier.width(8.dp))
+
                         Button(
                             onClick = { showSubRenewDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFF59E0B)
+                            ),
+                            contentPadding = PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 4.dp
+                            ),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(if (isPersian) "تمدید" else "Renew", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (isPersian) "تمدید" else "Renew",
+                                fontSize = 11.sp,
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -318,7 +423,9 @@ fun HomeScreen(
             // Subscription Expired Banner
             if (subActivated && isExpired) {
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF7F1D1D)),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF7F1D1D)
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -331,8 +438,14 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Lock, contentDescription = null, tint = Color(0xFFFCA5A5))
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFFFCA5A5)
+                            )
+
                             Spacer(modifier = Modifier.width(8.dp))
+
                             Text(
                                 text = if (isPersian)
                                     "زمان اشتراک شما به پایان رسیده است. قابلیت‌های آنالیز قفل می‌باشند (بخش‌های اعضای تیم، تاریخچه، راهنما و تنظیمات فعال هستند)."
@@ -342,39 +455,60 @@ fun HomeScreen(
                                 fontSize = 11.sp
                             )
                         }
+
                         Spacer(modifier = Modifier.width(8.dp))
+
                         Button(
                             onClick = { showSubRenewDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            ),
+                            contentPadding = PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 4.dp
+                            ),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text(if (isPersian) "تمدید اشتراک" else "Renew", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (isPersian) "تمدید اشتراک" else "Renew",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
 
-            // 1. Dashboard Summary Section
+            // Dashboard Summary Section
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isPersian) "داشبورد آزمایشگاه" else "Laboratory Dashboard",
+                            text = if (isPersian)
+                                "داشبورد آزمایشگاه"
+                            else
+                                "Laboratory Dashboard",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
+
                         Badge(containerColor = Color(0xFF10B981)) {
-                            Text(if (isPersian) "دیتابیس آماده" else "DB Encrypted", modifier = Modifier.padding(2.dp))
+                            Text(
+                                if (isPersian) "دیتابیس آماده" else "DB Encrypted",
+                                modifier = Modifier.padding(2.dp)
+                            )
                         }
                     }
 
@@ -388,45 +522,66 @@ fun HomeScreen(
                             label = if (isPersian) "کل آنالیزها" else "Total Analyses",
                             value = "${historyList.size}"
                         )
+
                         StatItem(
                             label = if (isPersian) "آخرین تاریخ" else "Last Analysis",
                             value = historyList.firstOrNull()?.dateFormatted ?: "-"
                         )
+
                         StatItem(
                             label = if (isPersian) "آخرین نمونه" else "Last Sample",
-                            value = historyList.firstOrNull()?.matchedSampleName?.take(10) ?: "-"
+                            value = historyList.firstOrNull()
+                                ?.matchedSampleName?.take(10) ?: "-"
                         )
                     }
                 }
             }
 
-            // 2. Camera Preview Box & Real-time Alignment Guide
+            // Camera Preview Box
             Card(
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.Black
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(340.dp)
-                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                    .border(
+                        2.dp,
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        RoundedCornerShape(16.dp)
+                    )
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
+
                     if (isCameraActive && hasCameraPermission.value) {
-                        // Live CameraX Stream directly inside the app
                         AndroidView(
                             factory = { ctx ->
                                 val previewView = PreviewView(ctx).apply {
                                     scaleType = PreviewView.ScaleType.FILL_CENTER
                                 }
-                                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+
+                                val cameraProviderFuture =
+                                    ProcessCameraProvider.getInstance(ctx)
+
                                 cameraProviderFuture.addListener({
                                     try {
-                                        val cameraProvider = cameraProviderFuture.get()
-                                        val preview = Preview.Builder().build().also {
-                                            it.setSurfaceProvider(previewView.surfaceProvider)
-                                        }
-                                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                                        val cameraProvider =
+                                            cameraProviderFuture.get()
+
+                                        val preview = Preview.Builder()
+                                            .build()
+                                            .also {
+                                                it.setSurfaceProvider(
+                                                    previewView.surfaceProvider
+                                                )
+                                            }
+
+                                        val cameraSelector =
+                                            CameraSelector.DEFAULT_BACK_CAMERA
 
                                         cameraProvider.unbindAll()
+
                                         cameraProvider.bindToLifecycle(
                                             lifecycleOwner,
                                             cameraSelector,
@@ -437,18 +592,20 @@ fun HomeScreen(
                                         e.printStackTrace()
                                     }
                                 }, ContextCompat.getMainExecutor(ctx))
+
                                 previewView
                             },
                             modifier = Modifier.fillMaxSize()
                         )
+
                     } else if (currentBitmap != null) {
                         Image(
                             bitmap = currentBitmap!!.asImageBitmap(),
                             contentDescription = "Sample Image",
                             modifier = Modifier.fillMaxSize()
                         )
+
                     } else {
-                        // Empty camera viewfinder placeholder with alignment guide
                         Column(
                             modifier = Modifier.align(Alignment.Center),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -459,16 +616,21 @@ fun HomeScreen(
                                 tint = Color.Gray,
                                 modifier = Modifier.size(48.dp)
                             )
+
                             Spacer(modifier = Modifier.height(8.dp))
+
                             Text(
-                                text = if (isPersian) "نمونه شکر را در مرکز قرار دهید" else "Place sugar sample inside alignment circle",
+                                text = if (isPersian)
+                                    "نمونه شکر را در مرکز قرار دهید"
+                                else
+                                    "Place sugar sample inside alignment circle",
                                 color = Color.LightGray,
                                 fontSize = 12.sp
                             )
                         }
                     }
 
-                    // Alignment Crosshairs & Circle Guide Overlay
+                    // Alignment Guide
                     if (gridEnabled) {
                         Box(
                             modifier = Modifier
@@ -476,10 +638,14 @@ fun HomeScreen(
                                 .align(Alignment.Center)
                                 .border(
                                     width = 2.dp,
-                                    color = if (qualityResult?.isPassed == true) Color(0xFF10B981) else Color(0xFF38BDF8),
+                                    color = if (qualityResult?.isPassed == true)
+                                        Color(0xFF10B981)
+                                    else
+                                        Color(0xFF38BDF8),
                                     shape = CircleShape
                                 )
                         )
+
                         Divider(
                             modifier = Modifier.align(Alignment.Center),
                             color = Color.White.copy(alpha = 0.3f),
@@ -487,29 +653,43 @@ fun HomeScreen(
                         )
                     }
 
-                    // Live Quality Status Indicator Badge
+                    // Live Quality Status
                     if (!isCameraActive && qualityResult != null) {
                         qualityResult.let { q ->
                             Surface(
-                                color = if (q.isPassed) Color(0xFF10B981).copy(alpha = 0.9f) else Color(0xFFEF4444).copy(alpha = 0.9f),
+                                color = if (q.isPassed)
+                                    Color(0xFF10B981).copy(alpha = 0.9f)
+                                else
+                                    Color(0xFFEF4444).copy(alpha = 0.9f),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(12.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(
+                                        horizontal = 8.dp,
+                                        vertical = 4.dp
+                                    ),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = if (q.isPassed) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                        imageVector = if (q.isPassed)
+                                            Icons.Default.CheckCircle
+                                        else
+                                            Icons.Default.Warning,
                                         contentDescription = null,
                                         tint = Color.White,
                                         modifier = Modifier.size(14.dp)
                                     )
+
                                     Spacer(modifier = Modifier.width(4.dp))
+
                                     Text(
-                                        text = if (q.isPassed) "Quality OK (${q.overallScore.toInt()}%)" else "Quality Rejected",
+                                        text = if (q.isPassed)
+                                            "Quality OK (${q.overallScore.toInt()}%)"
+                                        else
+                                            "Quality Rejected",
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
@@ -519,7 +699,7 @@ fun HomeScreen(
                         }
                     }
 
-                    // Optical Controls Bar & In-App Shutter Button
+                    // Optical Controls Bar
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -529,18 +709,25 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = { gridEnabled = !gridEnabled }) {
+                        IconButton(
+                            onClick = { gridEnabled = !gridEnabled }
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.GridOn,
                                 contentDescription = "Grid",
-                                tint = if (gridEnabled) MaterialTheme.colorScheme.primary else Color.Gray
+                                tint = if (gridEnabled)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    Color.Gray
                             )
                         }
 
                         if (isCameraActive && hasCameraPermission.value) {
                             Button(
                                 onClick = { captureInAppPhoto() },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                ),
                                 shape = CircleShape,
                                 modifier = Modifier.size(42.dp),
                                 contentPadding = PaddingValues(0.dp)
@@ -566,7 +753,9 @@ fun HomeScreen(
             // Quality Rejection Error Banner
             analysisError?.let { err ->
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF7F1D1D)),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color(0xFF7F1D1D)
+                    ),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -574,26 +763,52 @@ fun HomeScreen(
                         modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFFCA5A5))
+                        Icon(
+                            Icons.Default.Error,
+                            contentDescription = null,
+                            tint = Color(0xFFFCA5A5)
+                        )
+
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(err, color = Color.White, fontSize = 12.sp)
+
+                        Text(
+                            err,
+                            color = Color.White,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
 
-            // Main Action Buttons (Gallery Import, Camera/Capture, Analyze)
+            // Main Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+
                 Button(
-                    onClick = { checkSubscriptionAndExecute { galleryLauncher.launch("image/*") } },
+                    onClick = {
+                        checkSubscriptionAndExecute {
+                            galleryLauncher.launch("image/*")
+                        }
+                    },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.PhotoLibrary,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isPersian) "گالری" else "Gallery", fontSize = 12.sp)
+
+                    Text(
+                        if (isPersian) "گالری" else "Gallery",
+                        fontSize = 12.sp
+                    )
                 }
 
                 Button(
@@ -607,10 +822,18 @@ fun HomeScreen(
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
                 ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+
                     Spacer(modifier = Modifier.width(4.dp))
+
                     Text(
                         text = if (isCameraActive && hasCameraPermission.value) {
                             if (isPersian) "عکاسی" else "Capture"
@@ -624,7 +847,11 @@ fun HomeScreen(
                 Button(
                     onClick = {
                         checkSubscriptionAndExecute {
-                            if (currentBitmap == null && isCameraActive && hasCameraPermission.value) {
+                            if (
+                                currentBitmap == null &&
+                                isCameraActive &&
+                                hasCameraPermission.value
+                            ) {
                                 captureInAppPhoto {
                                     viewModel.analyzeCurrentBitmap()
                                     onNavigateToResult()
@@ -635,126 +862,195 @@ fun HomeScreen(
                             }
                         }
                     },
-                    enabled = (currentBitmap != null || (isCameraActive && hasCameraPermission.value)) && !isAnalyzing,
+                    enabled = (
+                        currentBitmap != null ||
+                        (isCameraActive && hasCameraPermission.value)
+                    ) && !isAnalyzing,
                     modifier = Modifier.weight(1.2f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
                 ) {
                     if (isAnalyzing) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White
+                        )
                     } else {
-                        Icon(Icons.Default.Analytics, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.Analytics,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isPersian) "آنالیز" else "Analyze", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+
+                        Text(
+                            if (isPersian) "آنالیز" else "Analyze",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
 
-    // Quick Access Navigation Grid
-Text(
-    text = if (isPersian) "دسترسی سریع:" else "Quick Access Modules:",
-    fontWeight = FontWeight.Bold,
-    fontSize = 14.sp
-)
+            // Quick Access Navigation Grid
+            Text(
+                text = if (isPersian)
+                    "دسترسی سریع:"
+                else
+                    "Quick Access Modules:",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
 
-Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp)
-) {
-    QuickNavCard(
-        title = if (isPersian) "مرجع" else "References",
-        icon = Icons.Default.Collections,
-        modifier = Modifier.weight(1f),
-        onClick = { checkSubscriptionAndExecute { onNavigateToReferences() } }
-    )
-    QuickNavCard(
-        title = if (isPersian) "تاریخچه" else "History",
-        icon = Icons.Default.History,
-        modifier = Modifier.weight(1f),
-        onClick = onNavigateToHistory
-    )
-    QuickNavCard(
-        title = if (isPersian) "گزارش‌ها" else "Reports",
-        icon = Icons.Default.Assessment,
-        modifier = Modifier.weight(1f),
-        onClick = { checkSubscriptionAndExecute { onNavigateToReports() } }
-    )
-}
+            // Row 1: References, History, Reports
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickNavCard(
+                    title = if (isPersian) "مرجع" else "References",
+                    icon = Icons.Default.Collections,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        checkSubscriptionAndExecute {
+                            onNavigateToReferences()
+                        }
+                    }
+                )
 
-Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp)
-) {
-    QuickNavCard(
-        title = if (isPersian) "کالیبراسیون" else "Calibration",
-        icon = Icons.Default.Tune,
-        modifier = Modifier.weight(1f),
-        onClick = { checkSubscriptionAndExecute { onNavigateToCalibration() } }
-    )
-    QuickNavCard(
-        title = if (isPersian) "راهنما" else "Help",
-        icon = Icons.Default.HelpOutline,
-        modifier = Modifier.weight(1f),
-        onClick = onNavigateToHelp
-    )
-    QuickNavCard(
-        title = if (isPersian) "اعضای تیم" else "Team",
-        icon = Icons.Default.Info,
-        modifier = Modifier.weight(1f),
-        onClick = onNavigateToAbout
-    )
-}
+                QuickNavCard(
+                    title = if (isPersian) "تاریخچه" else "History",
+                    icon = Icons.Default.History,
+                    modifier = Modifier.weight(1f),
+                    onClick = onNavigateToHistory
+                )
 
-Row(
-    modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp)
-) {
-    QuickNavCard(
-        title = if (isPersian) "مقایسه دو نمونه" else "Compare Samples",
-        icon = Icons.Default.Compare,
-        modifier = Modifier.weight(1f),
-        onClick = {
-            checkSubscriptionAndExecute {
-                onNavigateToCompare()
+                QuickNavCard(
+                    title = if (isPersian) "گزارش‌ها" else "Reports",
+                    icon = Icons.Default.Assessment,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        checkSubscriptionAndExecute {
+                            onNavigateToReports()
+                        }
+                    }
+                )
             }
-        }
-    )
-}
 
-            
-    // First Time Subscription Mandatory Setup Dialog
-    if (!subActivated) {
-        SubscriptionUnlockDialog(
-            viewModel = viewModel,
-            isFirstTime = true,
-            onSuccess = {}
-        )
-    }
+            // Row 2: Calibration, Help, Team
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickNavCard(
+                    title = if (isPersian) "کالیبراسیون" else "Calibration",
+                    icon = Icons.Default.Tune,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        checkSubscriptionAndExecute {
+                            onNavigateToCalibration()
+                        }
+                    }
+                )
 
-    // Expired Feature Notice Dialog
-    if (showExpiredNoticeDialog) {
-        ExpiredFeatureNoticeDialog(
-            isPersian = isPersian,
-            onDismiss = { showExpiredNoticeDialog = false },
-            onOpenRenewDialog = { showSubRenewDialog = true }
-        )
-    }
+                QuickNavCard(
+                    title = if (isPersian) "راهنما" else "Help",
+                    icon = Icons.Default.HelpOutline,
+                    modifier = Modifier.weight(1f),
+                    onClick = onNavigateToHelp
+                )
 
-    // Subscription Renewal Dialog
-    if (showSubRenewDialog) {
-        SubscriptionUnlockDialog(
-            viewModel = viewModel,
-            isFirstTime = false,
-            onDismiss = { showSubRenewDialog = false },
-            onSuccess = { showSubRenewDialog = false }
-        )
-    }
-}
+                QuickNavCard(
+                    title = if (isPersian) "اعضای تیم" else "Team",
+                    icon = Icons.Default.Info,
+                    modifier = Modifier.weight(1f),
+                    onClick = onNavigateToAbout
+                )
+            }
+
+            // Row 3: Compare Samples
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                QuickNavCard(
+                    title = if (isPersian)
+                        "مقایسه دو نمونه"
+                    else
+                        "Compare Samples",
+                    icon = Icons.Default.Compare,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        checkSubscriptionAndExecute {
+                            onNavigateToCompare()
+                        }
+                    }
+                )
+            }
+
+            // First Time Subscription Mandatory Setup Dialog
+            if (!subActivated) {
+                SubscriptionUnlockDialog(
+                    viewModel = viewModel,
+                    isFirstTime = true,
+                    onSuccess = {}
+                )
+            }
+
+            // Expired Feature Notice Dialog
+            if (showExpiredNoticeDialog) {
+                ExpiredFeatureNoticeDialog(
+                    isPersian = isPersian,
+                    onDismiss = {
+                        showExpiredNoticeDialog = false
+                    },
+                    onOpenRenewDialog = {
+                        showSubRenewDialog = true
+                    }
+                )
+            }
+
+            // Subscription Renewal Dialog
+            if (showSubRenewDialog) {
+                SubscriptionUnlockDialog(
+                    viewModel = viewModel,
+                    isFirstTime = false,
+                    onDismiss = {
+                        showSubRenewDialog = false
+                    },
+                    onSuccess = {
+                        showSubRenewDialog = false
+                    }
+                )
+            }
+        } // End Column
+    } // End Scaffold content lambda
+} // End HomeScreen
+
+
+// --------------------------------------------------
+// Helper Composables
+// --------------------------------------------------
 
 @Composable
-private fun StatItem(label: String, value: String) {
+private fun StatItem(
+    label: String,
+    value: String
+) {
     Column {
-        Text(text = label, fontSize = 11.sp, color = Color.Gray)
-        Text(text = value, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = Color.Gray
+        )
+
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -767,32 +1063,62 @@ private fun QuickNavCard(
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = modifier.clickable { onClick() }
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        modifier = modifier.clickable {
+            onClick()
+        }
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(imageVector = icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = MaterialTheme.colorScheme.primary
+            )
+
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = title, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+
+            Text(
+                text = title,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
 
 /**
  * Aspect-ratio-preserving bitmap preparation.
- * Reduces excessively large photos (e.g. > 1280px max dimension) to avoid OOM
- * without distorting or squashing crystal geometry into a square.
+ * Reduces excessively large photos without distorting the image.
  */
-private fun prepareBitmapPreservingAspect(source: Bitmap, maxDim: Int = 1280): Bitmap {
+private fun prepareBitmapPreservingAspect(
+    source: Bitmap,
+    maxDim: Int = 1280
+): Bitmap {
     val width = source.width
     val height = source.height
     val maxCurrent = maxOf(width, height)
+
     if (maxCurrent <= maxDim) return source
+
     val scale = maxDim.toFloat() / maxCurrent.toFloat()
-    val targetWidth = (width * scale).toInt().coerceAtLeast(1)
-    val targetHeight = (height * scale).toInt().coerceAtLeast(1)
-    return Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true)
+
+    val targetWidth = (width * scale)
+        .toInt()
+        .coerceAtLeast(1)
+
+    val targetHeight = (height * scale)
+        .toInt()
+        .coerceAtLeast(1)
+
+    return Bitmap.createScaledBitmap(
+        source,
+        targetWidth,
+        targetHeight,
+        true
+    )
 }
