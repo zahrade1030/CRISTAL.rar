@@ -1,13 +1,12 @@
+
 package com.example.ui.screens.result
 
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.export.ExportManager
 import com.example.ui.MainViewModel
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,288 +35,812 @@ fun AdvancedAnalysisCenterScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val classification by viewModel.classificationResult.collectAsState()
-    val pipelineOutput by viewModel.pipelineOutput.collectAsState()
-    val isDevMode by viewModel.isDeveloperMode.collectAsState()
-    val isPersian = viewModel.language.collectAsState().value == "fa"
-    val exportManager = remember { ExportManager(context) }
 
-    var selectedTab by remember { mutableStateOf(0) }
+    val classificationState by
+        viewModel.classificationResult.collectAsState()
+
+    val pipelineOutputState by
+        viewModel.pipelineOutput.collectAsState()
+
+    val isDevMode by
+        viewModel.isDeveloperMode.collectAsState()
+
+    val language by
+        viewModel.language.collectAsState()
+
+    val isPersian = language == "fa"
+
+    val exportManager = remember {
+        ExportManager(context)
+    }
+
+    var selectedTab by remember {
+        mutableStateOf(0)
+    }
+
     val tabs = listOf(
-        "1. Similarity",
-        "2. Features",
-        "3. Charts",
-        "4. Quality",
-        "5. Benchmark",
-        "6. Save/Export"
-    ) + if (isDevMode) listOf("7. Dev Stages") else emptyList()
+        if (isPersian) "شباهت" else "Similarity",
+        if (isPersian) "مقایسه نمونه‌ها" else "References",
+        if (isPersian) "ویژگی‌ها و نمودارها" else "Features & Charts",
+        if (isPersian) "کیفیت تصویر" else "Image Quality",
+        if (isPersian) "معیارهای پردازش" else "Benchmark",
+        if (isPersian) "ذخیره و خروجی" else "Save / Export"
+    ) + if (isDevMode) {
+        listOf(if (isPersian) "مراحل توسعه" else "Dev Stages")
+    } else {
+        emptyList()
+    }
+
+    val activeTab = selectedTab.coerceIn(0, tabs.lastIndex)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (isPersian) "مرکز آنالیز پیشرفته" else "Advanced Analysis Center") },
+                title = {
+                    Text(
+                        if (isPersian) {
+                            "مرکز آنالیز پیشرفته"
+                        } else {
+                            "Advanced Analysis Center"
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back"
+                        )
                     }
                 }
             )
         }
     ) { padding ->
-        if (classification == null || pipelineOutput == null) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(if (isPersian) "اطلاعات آنالیز موجود نیست" else "No analysis data available")
-            }
-            return@Scaffold
-        }
 
-        val result = classification!!
-        val output = pipelineOutput!!
+        val result = classificationState
+        val output = pipelineOutputState
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            ScrollableTabRow(selectedTabIndex = selectedTab) {
-                tabs.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = { Text(title, fontSize = 12.sp) }
-                    )
-                }
-            }
-
-            LazyColumn(
+        if (result == null || output == null) {
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(padding),
+                contentAlignment = Alignment.Center
             ) {
-                when (selectedTab) {
-                    0 -> { // 1. Similarity & ICUMSA Estimation
-                        item {
-                            val est = result.icumsaEstimation
-                            if (est != null) {
+                Text(
+                    if (isPersian) {
+                        "اطلاعات آنالیز موجود نیست. ابتدا یک تصویر را تحلیل کنید."
+                    } else {
+                        "No analysis data. Analyze an image first."
+                    }
+                )
+            }
+        } else {
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+
+                ScrollableTabRow(
+                    selectedTabIndex = activeTab
+                ) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = activeTab == index,
+                            onClick = {
+                                selectedTab = index
+                            },
+                            text = {
+                                Text(
+                                    title,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        )
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+
+                    when (activeTab) {
+
+                        // 1. Similarity analysis
+                        0 -> {
+
+                            item {
                                 Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (est.isOutOfRange || est.isUnknown) Color(0xFF451A1A) else MaterialTheme.colorScheme.primaryContainer
-                                    ),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
                                         Text(
-                                            text = if (isPersian) "تخمین عددی ICUMSA (درونیابی در فضای ۳بعدی LAB)" else "LAB-Based ICUMSA Interpolation",
+                                            if (isPersian) {
+                                                "نتیجه طبقه‌بندی نمونه"
+                                            } else {
+                                                "Sample Classification Result"
+                                            },
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
+                                            fontSize = 16.sp,
                                             color = MaterialTheme.colorScheme.primary
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        val statusText = if (est.isOutOfRange) "خارج از محدوده مراجع (Out of Range)"
-                                        else if (est.isUnknown) "نمونه ناشناخته (Unknown Sample)"
-                                        else "${String.format("%.1f", est.estimatedIcumsa)} IU"
-                                        MetricRow("Estimated ICUMSA", statusText)
-                                        MetricRow("Reference Interval", "Ref ${est.selectedRef1.sampleId} (${est.selectedRef1.icumsaValue}) ➔ Ref ${est.selectedRef2.sampleId} (${est.selectedRef2.icumsaValue})")
-                                        MetricRow("Relative Position (t)", "${String.format("%.4f", est.relativePositionT)} (${String.format("%.1f", est.relativePositionT * 100)}%)")
-                                        MetricRow("Sample Median LAB", "L*=${String.format("%.2f", est.sampleLabMedian.medianL)}, a*=${String.format("%.2f", est.sampleLabMedian.medianA)}, b*=${String.format("%.2f", est.sampleLabMedian.medianB)}")
-                                        MetricRow("Distance to Path (d)", String.format("%.2f", est.distanceToPath))
-                                        MetricRow("Range Status", if (est.isOutOfRange) "خارج از محدوده" else "در محدوده مراجع")
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        MetricRow(
+                                            "Nearest Reference",
+                                            result.nearestSampleName
+                                        )
+
+                                        MetricRow(
+                                            "Reference ID",
+                                            result.nearestSampleId.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Confidence Score",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                result.confidenceScorePct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Confidence Level",
+                                            result.confidenceLevel.name
+                                        )
+
+                                        MetricRow(
+                                            "Classification Status",
+                                            if (result.isUnknown) {
+                                                "Unknown Sample"
+                                            } else {
+                                                "Matched"
+                                            }
+                                        )
+
+                                        MetricRow(
+                                            "Classifiable",
+                                            result.isClassifiable.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Threshold",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                result.thresholdUsed
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Processing Time",
+                                            "${result.processingTimeMs} ms"
+                                        )
                                     }
                                 }
-                                Spacer(modifier = Modifier.height(12.dp))
                             }
 
-                            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Similarity Metrics Analysis (191-dim Vector)", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    MetricRow("Euclidean Distance", "${String.format("%.2f", result.topMatch.euclideanDistance)} (Sim: ${String.format("%.1f", result.topMatch.euclideanSimilarityPct)}%)")
-                                    MetricRow("Cosine Similarity", "${String.format("%.4f", result.topMatch.cosineSimilarity)} (Sim: ${String.format("%.1f", result.topMatch.cosineSimilarityPct)}%)")
-                                    MetricRow("Bhattacharyya Hist Dist", "${String.format("%.4f", result.topMatch.bhattacharyyaDistance)} (Sim: ${String.format("%.1f", result.topMatch.bhattacharyyaSimilarityPct)}%)")
-                                    MetricRow("Combined Similarity Match", "${String.format("%.2f", result.topMatch.finalSimilarityPct)}%")
-                                    MetricRow("Confidence Level", result.confidenceLevel.name)
-                                    MetricRow("Total Execution Time", "${result.processingTimeMs} ms")
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text(
+                                            "Similarity Metrics (63-dim Vector)",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        MetricRow(
+                                            "Euclidean Distance",
+                                            String.format(
+                                                Locale.US,
+                                                "%.4f",
+                                                result.topMatch.euclideanDistance
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Euclidean Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                result.topMatch.euclideanSimilarityPct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Cosine Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.4f",
+                                                result.topMatch.cosineSimilarity
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Cosine Match",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                result.topMatch.cosineSimilarityPct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Bhattacharyya Distance",
+                                            String.format(
+                                                Locale.US,
+                                                "%.4f",
+                                                result.topMatch.bhattacharyyaDistance
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Final Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                result.topMatch.finalSimilarityPct
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                    )
+                                ) {
+                                    Text(
+                                        if (isPersian) {
+                                            "توجه: این نتیجه، نزدیک‌ترین نمونه مرجع را از نظر ویژگی‌های تصویری مشخص می‌کند. مقدار عددی ICUMSA از این نتیجه به‌تنهایی قابل استخراج یا تأیید آزمایشگاهی نیست."
+                                        } else {
+                                            "Note: This result identifies the closest reference by image features. It does not provide a certified numerical ICUMSA measurement."
+                                        },
+                                        modifier = Modifier.padding(16.dp),
+                                        fontSize = 12.sp
+                                    )
                                 }
                             }
                         }
-                    }
 
-                    1 -> { // 2. Feature Comparison
-                        item {
-                            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Feature Comparison vs Reference Samples", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    for (m in result.allMatches) {
-                                        Text("${m.sampleName} (ICUMSA ${m.icumsaValue})", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                                        Text("• Euc Distance: ${String.format("%.2f", m.euclideanDistance)} (Sim: ${String.format("%.1f", m.euclideanSimilarityPct)}%)", fontSize = 11.sp)
-                                        Text("• Cosine Match: ${String.format("%.1f", m.cosineSimilarityPct)}%", fontSize = 11.sp)
-                                        Text("• Bhattacharyya Hist Match: ${String.format("%.1f", m.bhattacharyyaSimilarityPct)}%", fontSize = 11.sp)
-                                        Text("• Final Similarity Match: ${String.format("%.1f", m.finalSimilarityPct)}%", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Divider()
-                                        Spacer(modifier = Modifier.height(8.dp))
+                        // 2. Reference comparison
+                        1 -> {
+
+                            if (result.allMatches.isEmpty()) {
+                                item {
+                                    Text("No reference matches available.")
+                                }
+                            }
+
+                            items(result.allMatches) { match ->
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp)
+                                    ) {
+                                        Text(
+                                            match.sampleName,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        Spacer(Modifier.height(8.dp))
+
+                                        MetricRow(
+                                            "Sample ID",
+                                            match.sampleId.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Reference ICUMSA Label",
+                                            match.icumsaValue.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Euclidean Distance",
+                                            String.format(
+                                                Locale.US,
+                                                "%.4f",
+                                                match.euclideanDistance
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Euclidean Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                match.euclideanSimilarityPct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Cosine Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                match.cosineSimilarityPct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Bhattacharyya Match",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                match.bhattacharyyaSimilarityPct
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "Final Similarity",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f%%",
+                                                match.finalSimilarityPct
+                                            )
+                                        )
                                     }
                                 }
                             }
                         }
-                    }
 
-                    2 -> { // 3. Feature Visualization Charts
-                        item {
-                            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Color Histogram & LAB/HSV Channels", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.height(12.dp))
+                        // 3. Feature visualization
+                        2 -> {
 
-                                    Text("RGB Color Histogram (64 Bins)", fontSize = 12.sp, color = Color.Gray)
-                                    Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
-                                        val hist = output.completeFeatureSet.colorHistogram
-                                        val barW = size.width / hist.size
-                                        for (i in hist.indices) {
-                                            val barH = hist[i] * size.height * 8f
-                                            drawRect(
-                                                color = Color(0xFF38BDF8),
-                                                topLeft = Offset(i * barW, size.height - barH),
-                                                size = androidx.compose.ui.geometry.Size(barW * 0.8f, barH)
+                            item {
+                                val features = output.completeFeatureSet
+                                val histogram = features.colorHistogram
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text(
+                                            "Color Histogram",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        Canvas(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(130.dp)
+                                        ) {
+                                            if (histogram.isNotEmpty()) {
+                                                val maxValue =
+                                                    histogram.maxOrNull()
+                                                        ?.takeIf { it > 0f }
+                                                        ?: 1f
+
+                                                val barWidth =
+                                                    size.width / histogram.size
+
+                                                for (i in histogram.indices) {
+                                                    val barHeight =
+                                                        (histogram[i] / maxValue) *
+                                                            size.height
+
+                                                    drawRect(
+                                                        color = Color(0xFF38BDF8),
+                                                        topLeft = Offset(
+                                                            i * barWidth,
+                                                            size.height - barHeight
+                                                        ),
+                                                        size = Size(
+                                                            barWidth * 0.8f,
+                                                            barHeight
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Spacer(Modifier.height(16.dp))
+
+                                        Text(
+                                            "CIELAB Means",
+                                            fontWeight = FontWeight.Bold
+                                        )
+
+                                        val lab = features.labMeans
+
+                                        MetricRow(
+                                            "L*",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f",
+                                                lab.first
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "a*",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f",
+                                                lab.second
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "b*",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f",
+                                                lab.third
+                                            )
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        Text(
+                                            "HSV Means",
+                                            fontWeight = FontWeight.Bold
+                                        )
+
+                                        val hsv = features.hsvMeans
+
+                                        MetricRow(
+                                            "H",
+                                            String.format(
+                                                Locale.US,
+                                                "%.2f°",
+                                                hsv.first
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "S",
+                                            String.format(
+                                                Locale.US,
+                                                "%.3f",
+                                                hsv.second
+                                            )
+                                        )
+
+                                        MetricRow(
+                                            "V",
+                                            String.format(
+                                                Locale.US,
+                                                "%.3f",
+                                                hsv.third
+                                            )
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        MetricRow(
+                                            "Feature Vector Size",
+                                            features.concatenatedVector.size.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Normalized Vector Size",
+                                            output.normalizedVector.size.toString()
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4. Image quality
+                        3 -> {
+
+                            item {
+                                val quality = output.qualityResult
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text(
+                                            "Image Quality Assessment",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        MetricRow(
+                                            "Overall Quality",
+                                            "${quality.overallScore.toInt()}%"
+                                        )
+
+                                        MetricRow(
+                                            "Blur Score",
+                                            quality.blurScore.toInt().toString()
+                                        )
+
+                                        MetricRow(
+                                            "Brightness Score",
+                                            quality.brightnessScore.toInt().toString()
+                                        )
+
+                                        MetricRow(
+                                            "Contrast Score",
+                                            quality.contrastScore.toInt().toString()
+                                        )
+
+                                        MetricRow(
+                                            "Center Alignment",
+                                            "${(quality.centerAlignmentScore * 100).toInt()}%"
+                                        )
+
+                                        MetricRow(
+                                            "Quality Passed",
+                                            quality.isPassed.toString()
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        Text(
+                                            if (quality.isPassed) {
+                                                "Image quality validation passed."
+                                            } else {
+                                                quality.rejectionReason
+                                                    ?: "Image quality validation failed."
+                                            },
+                                            color = if (quality.isPassed) {
+                                                Color(0xFF10B981)
+                                            } else {
+                                                Color(0xFFEF4444)
+                                            },
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 5. Benchmark
+                        4 -> {
+
+                            item {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(16.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(16.dp)
+                                    ) {
+                                        Text(
+                                            "Processing Benchmark",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp
+                                        )
+
+                                        Spacer(Modifier.height(12.dp))
+
+                                        MetricRow(
+                                            "Feature Extraction Time",
+                                            "${output.completeFeatureSet.extractionTimeMs} ms"
+                                        )
+
+                                        MetricRow(
+                                            "Total Processing Time",
+                                            "${result.processingTimeMs} ms"
+                                        )
+
+                                        MetricRow(
+                                            "Feature Vector Dimensions",
+                                            output.normalizedVector.size.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Reference Matches",
+                                            result.allMatches.size.toString()
+                                        )
+
+                                        MetricRow(
+                                            "Classification Threshold",
+                                            "${result.thresholdUsed}%"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 6. Save and export
+                        5 -> {
+
+                            item {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                val pdf =
+                                                    exportManager.exportToPdf(result)
+
+                                                Toast.makeText(
+                                                    context,
+                                                    "PDF: ${pdf.name}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                exportManager.openFile(
+                                                    pdf,
+                                                    "application/pdf"
+                                                )
+                                            } catch (e: Exception) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "PDF export failed: ${e.localizedMessage}",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PictureAsPdf,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Export PDF Report")
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                val csv =
+                                                    exportManager.exportToExcel(
+                                                        listOf(result)
+                                                    )
+
+                                                Toast.makeText(
+                                                    context,
+                                                    "CSV: ${csv.name}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                exportManager.openFile(
+                                                    csv,
+                                                    "text/csv"
+                                                )
+                                            } catch (e: Exception) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "CSV export failed: ${e.localizedMessage}",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF059669)
+                                        )
+                                    ) {
+                                        Icon(
+                                            Icons.Default.TableChart,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Export CSV for Excel")
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            try {
+                                                val encrypted =
+                                                    exportManager.exportToEncryptedJson(
+                                                        listOf(result)
+                                                    )
+
+                                                Toast.makeText(
+                                                    context,
+                                                    "Encrypted JSON: ${encrypted.name}",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                exportManager.shareFile(
+                                                    encrypted,
+                                                    "application/octet-stream"
+                                                )
+                                            } catch (e: Exception) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Encrypted export failed: ${e.localizedMessage}",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color(0xFF6B21A8)
+                                        )
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Lock,
+                                            contentDescription = null
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Export Encrypted JSON")
+                                    }
+                                }
+                            }
+                        }
+
+                        // 7. Developer stages
+                        6 -> {
+
+                            if (isDevMode) {
+                                items(output.stages) { stage ->
+
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp)
+                                        ) {
+                                            Text(
+                                                stage.stageName,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+
+                                            Text(
+                                                stage.description,
+                                                fontSize = 12.sp,
+                                                color = Color.Gray
+                                            )
+
+                                            Spacer(Modifier.height(8.dp))
+
+                                            Image(
+                                                bitmap = stage.bitmap.asImageBitmap(),
+                                                contentDescription = stage.stageName,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(180.dp)
+                                                    .clip(
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .border(
+                                                        1.dp,
+                                                        Color.Gray,
+                                                        RoundedCornerShape(8.dp)
+                                                    )
                                             )
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("LAB Means (L*, a*, b*)", fontSize = 12.sp, color = Color.Gray)
-                                    val lab = output.completeFeatureSet.labMeans
-                                    Text("L*: ${String.format("%.1f", lab.first)}  a*: ${String.format("%.1f", lab.second)}  b*: ${String.format("%.1f", lab.third)}", fontWeight = FontWeight.Bold)
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("HSV Means (H, S, V)", fontSize = 12.sp, color = Color.Gray)
-                                    val hsv = output.completeFeatureSet.hsvMeans
-                                    Text("H: ${String.format("%.1f", hsv.first)}°  S: ${String.format("%.2f", hsv.second)}  V: ${String.format("%.2f", hsv.third)}", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-
-                    3 -> { // 4. Image Quality Analysis
-                        item {
-                            val q = output.qualityResult
-                            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Image Quality Assessment", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    MetricRow("Overall Quality Score", "${q.overallScore.toInt()}%")
-                                    MetricRow("Blur Score (Laplacian Var)", "${q.blurScore.toInt()}")
-                                    MetricRow("Mean Brightness", "${q.brightnessScore.toInt()}")
-                                    MetricRow("Contrast Score", "${q.contrastScore.toInt()}")
-                                    MetricRow("Center Alignment", "${(q.centerAlignmentScore * 100).toInt()}%")
-
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text("Laboratory Recommendations:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                    Text(
-                                        if (q.isPassed) "• Sample lighting and position are optimal for ICUMSA color extraction."
-                                        else "• ${q.rejectionReason ?: "Improve illumination and sample position."}",
-                                        fontSize = 12.sp,
-                                        color = if (q.isPassed) Color(0xFF10B981) else Color(0xFFEF4444)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    4 -> { // 5. Benchmark
-                        item {
-                            Card(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    Text("Distance Metrics Benchmark", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    MetricRow("Euclidean Calculation Time", "< 1 ms")
-                                    MetricRow("Cosine Similarity Time", "< 1 ms")
-                                    MetricRow("Total Feature Vector Extraction", "${output.completeFeatureSet.extractionTimeMs} ms")
-                                    MetricRow("Pipeline Execution Benchmark", "PASSED (Optimal Native Performance)")
-                                }
-                            }
-                        }
-                    }
-
-                    5 -> { // 6. Save & Export
-                        item {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Button(
-                                    onClick = {
-                                        val pdf = exportManager.exportToPdf(result)
-                                        Toast.makeText(context, if (isPersian) "گزارش PDF در دانلودها ذخیره شد" else "PDF saved to Downloads: ${pdf.name}", Toast.LENGTH_SHORT).show()
-                                        exportManager.openFile(pdf, "application/pdf")
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.PictureAsPdf, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (isPersian) "دانلود و باز کردن گزارش کامل PDF" else "Download & Open Complete PDF Report")
-                                }
-
-                                Button(
-                                    onClick = {
-                                        val excel = exportManager.exportToExcel(listOf(result))
-                                        Toast.makeText(context, if (isPersian) "جدول اکسل در دانلودها ذخیره شد" else "Excel table saved to Downloads: ${excel.name}", Toast.LENGTH_SHORT).show()
-                                        exportManager.openFile(excel, "text/csv")
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.TableChart, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (isPersian) "دانلود و باز کردن جدول اکسل (CSV / Excel)" else "Download & Open Excel Data Table")
-                                }
-
-                                Button(
-                                    onClick = {
-                                        val pdf = exportManager.exportToPdf(result)
-                                        exportManager.shareFile(pdf, "application/pdf")
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Share, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (isPersian) "اشتراک‌گذاری گزارش PDF" else "Share PDF Report")
-                                }
-
-                                Button(
-                                    onClick = {
-                                        val encJson = exportManager.exportToEncryptedJson(listOf(result))
-                                        Toast.makeText(context, "Exported Encrypted JSON: ${encJson.name}", Toast.LENGTH_SHORT).show()
-                                        exportManager.shareFile(encJson, "application/json")
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6B21A8)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Default.Lock, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(if (isPersian) "خروجی رمزنگاری شده (.json.enc)" else "Export Encrypted Vector Payload (.json.enc)")
-                                }
-                            }
-                        }
-                    }
-
-                    6 -> { // 7. Developer Stages View
-                        items(output.stages) { stage ->
-                            Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(stage.stageName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
-                                    Text(stage.description, fontSize = 11.sp, color = Color.Gray)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Image(
-                                        bitmap = stage.bitmap.asImageBitmap(),
-                                        contentDescription = stage.stageName,
-                                        modifier = Modifier
-                                            .height(180.dp)
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .border(1.dp, Color.Gray, RoundedCornerShape(8.dp))
-                                    )
                                 }
                             }
                         }
@@ -327,12 +852,30 @@ fun AdvancedAnalysisCenterScreen(
 }
 
 @Composable
-private fun MetricRow(label: String, value: String) {
+private fun MetricRow(
+    label: String,
+    value: String
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontSize = 12.sp, color = Color.Gray)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = Color.Gray,
+            modifier = Modifier.weight(1f)
+        )
+
+        Spacer(Modifier.width(8.dp))
+
+        Text(
+            text = value,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
