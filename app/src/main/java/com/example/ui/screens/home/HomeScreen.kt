@@ -61,7 +61,8 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToHelp: () -> Unit,
     onNavigateToDevCenter: () -> Unit,
-    onNavigateToAbout: () -> Unit = {}
+    onNavigateToAbout: () -> Unit = {},
+    onNavigateToCompare: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -648,57 +649,78 @@ fun HomeScreen(
                 }
             }
 
-            // Quick Access Navigation Grid
-            Text(
-                text = if (isPersian) "دسترسی سریع:" else "Quick Access Modules:",
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
-            )
+    // Quick Access Navigation Grid
+Text(
+    text = if (isPersian) "دسترسی سریع:" else "Quick Access Modules:",
+    fontWeight = FontWeight.Bold,
+    fontSize = 14.sp
+)
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QuickNavCard(
-                    title = if (isPersian) "مرجع" else "References",
-                    icon = Icons.Default.Collections,
-                    modifier = Modifier.weight(1f),
-                    onClick = { checkSubscriptionAndExecute { onNavigateToReferences() } }
-                )
-                QuickNavCard(
-                    title = if (isPersian) "تاریخچه" else "History",
-                    icon = Icons.Default.History,
-                    modifier = Modifier.weight(1f),
-                    onClick = onNavigateToHistory
-                )
-                QuickNavCard(
-                    title = if (isPersian) "گزارش‌ها" else "Reports",
-                    icon = Icons.Default.Assessment,
-                    modifier = Modifier.weight(1f),
-                    onClick = { checkSubscriptionAndExecute { onNavigateToReports() } }
-                )
-            }
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp)
+) {
+    QuickNavCard(
+        title = if (isPersian) "مرجع" else "References",
+        icon = Icons.Default.Collections,
+        modifier = Modifier.weight(1f),
+        onClick = { checkSubscriptionAndExecute { onNavigateToReferences() } }
+    )
+    QuickNavCard(
+        title = if (isPersian) "تاریخچه" else "History",
+        icon = Icons.Default.History,
+        modifier = Modifier.weight(1f),
+        onClick = onNavigateToHistory
+    )
+    QuickNavCard(
+        title = if (isPersian) "گزارش‌ها" else "Reports",
+        icon = Icons.Default.Assessment,
+        modifier = Modifier.weight(1f),
+        onClick = { checkSubscriptionAndExecute { onNavigateToReports() } }
+    )
+}
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                QuickNavCard(
-                    title = if (isPersian) "کالیبراسیون" else "Calibration",
-                    icon = Icons.Default.Tune,
-                    modifier = Modifier.weight(1f),
-                    onClick = { checkSubscriptionAndExecute { onNavigateToCalibration() } }
-                )
-                QuickNavCard(
-                    title = if (isPersian) "راهنما" else "Help",
-                    icon = Icons.Default.HelpOutline,
-                    modifier = Modifier.weight(1f),
-                    onClick = onNavigateToHelp
-                )
-                QuickNavCard(
-                    title = if (isPersian) "اعضای تیم" else "Team",
-                    icon = Icons.Default.Info,
-                    modifier = Modifier.weight(1f),
-                    onClick = onNavigateToAbout
-                )
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp)
+) {
+    QuickNavCard(
+        title = if (isPersian) "کالیبراسیون" else "Calibration",
+        icon = Icons.Default.Tune,
+        modifier = Modifier.weight(1f),
+        onClick = { checkSubscriptionAndExecute { onNavigateToCalibration() } }
+    )
+    QuickNavCard(
+        title = if (isPersian) "راهنما" else "Help",
+        icon = Icons.Default.HelpOutline,
+        modifier = Modifier.weight(1f),
+        onClick = onNavigateToHelp
+    )
+    QuickNavCard(
+        title = if (isPersian) "اعضای تیم" else "Team",
+        icon = Icons.Default.Info,
+        modifier = Modifier.weight(1f),
+        onClick = onNavigateToAbout
+    )
+}
+
+Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp)
+) {
+    QuickNavCard(
+        title = if (isPersian) "مقایسه دو نمونه" else "Compare Samples",
+        icon = Icons.Default.Compare,
+        modifier = Modifier.weight(1f),
+        onClick = {
+            checkSubscriptionAndExecute {
+                onNavigateToCompare()
             }
         }
-    }
+    )
+}
 
+            
     // First Time Subscription Mandatory Setup Dialog
     if (!subActivated) {
         SubscriptionUnlockDialog(
