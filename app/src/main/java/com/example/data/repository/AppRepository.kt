@@ -1,6 +1,9 @@
+
 package com.example.data.repository
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import com.example.cv.*
 import com.example.data.db.*
 import com.example.data.preferences.AppPreferences
@@ -8,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -15,14 +20,29 @@ import java.util.Locale
 class AppRepository(
     private val db: AppDatabase,
     private val preferences: AppPreferences,
-    private val context: android.content.Context? = null,
+    private val context: Context? = null,
     private val pipeline: OpenCvPipeline = OpenCvPipeline()
 ) {
 
-    val allReferences: Flow<List<ReferenceSampleEntity>> = db.referenceSampleDao().getAllSamples()
-    val allHistory: Flow<List<AnalysisHistoryEntity>> = db.analysisHistoryDao().getAllHistory()
-    val favoriteHistory: Flow<List<AnalysisHistoryEntity>> = db.analysisHistoryDao().getFavorites()
-    val calibrationProfiles: Flow<List<CalibrationProfileEntity>> = db.calibrationProfileDao().getAllProfiles()
+    // --------------------------------------------------
+    // DATABASE FLOWS
+    // --------------------------------------------------
+
+    val allReferences: Flow<List<ReferenceSampleEntity>> =
+        db.referenceSampleDao().getAllSamples()
+
+    val allHistory: Flow<List<AnalysisHistoryEntity>> =
+        db.analysisHistoryDao().getAllHistory()
+
+    val favoriteHistory: Flow<List<AnalysisHistoryEntity>> =
+        db.analysisHistoryDao().getFavorites()
+
+    val calibrationProfiles: Flow<List<CalibrationProfileEntity>> =
+        db.calibrationProfileDao().getAllProfiles()
+
+    // --------------------------------------------------
+    // PREFERENCE FLOWS
+    // --------------------------------------------------
 
     val languageFlow = preferences.languageFlow
     val themeFlow = preferences.themeFlow
@@ -33,113 +53,214 @@ class AppRepository(
     val biometricEnabledFlow = preferences.biometricEnabledFlow
     val screenshotProtectedFlow = preferences.screenshotProtectedFlow
 
-    /**
-     * Executes classification analysis on a captured bitmap
-     */
+    // --------------------------------------------------
+    // ANALYZE IMAGE
+    // --------------------------------------------------
+
     suspend fun analyzeImage(
         bitmap: Bitmap,
         batchId: String? = null
-    ): Pair<ClassificationResult, OpenCvPipeline.PipelineOutput> = withContext(Dispatchers.Default) {
-        val references = db.referenceSampleDao().getAllSamplesDirect()
-        val normMethodStr = preferences.normalizationFlow.first()
-        val threshold = preferences.similarityThresholdFlow.first()
+    ): Pair<ClassificationResult, PipelineOutput> =
+        withContext(Dispatchers.Default) {
 
-        val normMethod = if (normMethodStr == "MIN_MAX_SCALER") {
-            NormalizationMethod.MIN_MAX_SCALER
-        } else {
-            NormalizationMethod.STANDARD_SCALER
-        }
+            val references =
+                db.referenceSampleDao().getAllSamplesDirect()
 
-        val featureScaler = FeatureScaler()
-        val storedRefs = references.mapNotNull { ref ->
-            try {
-                val parsed = VectorFormat.parse(ref.featureVectorJson)
-                if (parsed != null && parsed.vector.size == ProvisionalConstants.EXPECTED_FEATURE_VECTOR_SIZE) {
-                    val normVec = featureScaler.scale(parsed.vector, normMethod)
-                    StoredReferenceVector(
-                        sampleId = ref.id,
-                        sampleName = ref.name,
-                        icumsaValue = ref.icumsaValue,
-                        vector = normVec,
-                        lab = parsed.lab,
-                        source = ref.source
-                    )
+            val normMethodStr =
+                preferences.normalizationFlow.first()
+
+            val threshold =
+                preferences.similarityThresholdFlow.first()
+
+            val normMethod =
+                if (normMethodStr == "MIN_MAX_SCALER") {
+                    NormalizationMethod.MIN_MAX_SCALER
                 } else {
-                    android.util.Log.w("AppRepository", "Skipping invalid reference sample #${ref.id} (${ref.name})")
+                    NormalizationMethod.STANDARD_SCALER
+                }
+
+            val featureScaler = FeatureScaler()
+
+            // Only accept valid vectors matching the active 63-dimensional schema.
+            val storedRefs = references.mapNotNull { reference ->
+
+                try {
+                    val parsed =
+                        VectorFormat.parse(reference.featureVectorJson)
+
+                    if (parsed == null) {
+                        Log.w(
+                            "AppRepository",
+                            "Invalid vector for reference #${reference.id}"
+                        )
+                        return@mapNotNull null
+                    }
+
+                    if (
+                        parsed.vector.size !=
+                        FeatureSchema.FEATURE_VECTOR_SIZE
+                    ) {
+                        Log.w(
+                            "AppRepository",
+                            "Skipping reference #${reference.id}: " +
+                                "expected ${FeatureSchema.FEATURE_VECTOR_SIZE}, " +
+                                "found ${parsed.vector.size}"
+                        )
+                        return@mapNotNull null
+                    }
+
+                    if (parsed.vector.any { !it.isFinite() }) {
+                        Log.w(
+                            "AppRepository",
+                            "Non-finite feature vector for reference #${reference.id}"
+                        )
+                        return@mapNotNull null
+                    }
+
+                    val normalizedVector =
+                        featureScaler.scale(parsed.vector, normMethod)
+
+                    StoredReferenceVector(
+                        sampleId = reference.id,
+                        sampleName = reference.name,
+                        icumsaValue = reference.icumsaValue,
+                        vector = normalizedVector
+                    )
+
+                } catch (e: Exception) {
+
+                    Log.e(
+                        "AppRepository",
+                        "Failed to load reference #${reference.id}",
+                        e
+                    )
+
                     null
                 }
+            }
+
+            // Execute the current image-processing pipeline.
+            val (classification, output) = pipeline.processImage(
+                originalBitmap = bitmap,
+                referenceSamples = storedRefs,
+                normalizationMethod = normMethod,
+                similarityThresholdPct = threshold
+            )
+
+            // Save a copy of the processed image for history.
+            val now = Date()
+
+            val dateFmt =
+                SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                    .format(now)
+
+            val timeFmt =
+                SimpleDateFormat("HH:mm:ss", Locale.US)
+                    .format(now)
+
+            val matchedReference =
+                references.firstOrNull {
+                    it.id == classification.nearestSampleId
+                }
+
+            var savedImagePath: String? = null
+
+            try {
+                val appContext = context
+
+                if (appContext != null) {
+
+                    val directory = File(
+                        appContext.filesDir,
+                        "analysis_history"
+                    )
+
+                    if (!directory.exists()) {
+                        directory.mkdirs()
+                    }
+
+                    val imageFile = File(
+                        directory,
+                        "analysis_${now.time}.jpg"
+                    )
+
+                    FileOutputStream(imageFile).use { stream ->
+                        output.processedBitmap.compress(
+                            Bitmap.CompressFormat.JPEG,
+                            90,
+                            stream
+                        )
+                    }
+
+                    savedImagePath = imageFile.absolutePath
+                }
+
             } catch (e: Exception) {
-                android.util.Log.e("AppRepository", "Failed to parse reference sample ${ref.id}: ${e.message}")
-                null
+
+                Log.e(
+                    "AppRepository",
+                    "Could not save analysis image",
+                    e
+                )
             }
+
+            // Store the raw extracted feature vector, not the normalized
+            // classification vector. This keeps history data interpretable.
+            val rawFeatureVector =
+                output.completeFeatureSet.concatenatedVector
+
+            val labMeans =
+                output.completeFeatureSet.labMeans
+
+            val historyEntity = AnalysisHistoryEntity(
+                timestamp = now.time,
+                dateFormatted = dateFmt,
+                timeFormatted = timeFmt,
+                imagePath = savedImagePath,
+
+                matchedSampleId = classification.nearestSampleId,
+                matchedSampleName = classification.nearestSampleName,
+
+                confidenceScorePct = classification.confidenceScorePct,
+                confidenceLevel = classification.confidenceLevel.name,
+                isUnknown = classification.isUnknown,
+
+                euclideanDistance =
+                    classification.topMatch.euclideanDistance,
+
+                // The current classifier does not provide a separate
+                // Manhattan-distance value. Zero means unavailable;
+                // it must not be interpreted as a measured distance.
+                manhattanDistance = 0.0,
+
+                cosineSimilarity =
+                    classification.topMatch.cosineSimilarity,
+
+                featureVectorJson = VectorFormat.serialize(
+                    vector = rawFeatureVector,
+                    lab = labMeans,
+                    schema = FeatureSchema.SCHEMA_VERSION
+                ),
+
+                qualityScore = output.qualityResult.overallScore,
+                processingTimeMs = classification.processingTimeMs,
+
+                batchId = batchId,
+                normalizationMethod = normMethod.name,
+                algorithmVersion = "v3.0.0",
+
+                matchedImagePath = matchedReference?.imagePath
+            )
+
+            db.analysisHistoryDao().insert(historyEntity)
+
+            Pair(classification, output)
         }
 
-        val (classification, output) = pipeline.processImage(
-            originalBitmap = bitmap,
-            referenceSamples = storedRefs,
-            normalizationMethod = normMethod,
-            similarityThresholdPct = threshold
-        )
+    // --------------------------------------------------
+    // UPDATE REFERENCE SAMPLE
+    // --------------------------------------------------
 
-        // Automatically record analysis in local Room database with quality gate
-        val now = Date()
-        val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
-        val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US).format(now)
-
-        val matchedRef = references.find { it.id == classification.nearestSampleId }
-
-        var capturedSavedPath: String? = null
-        val ctx = context ?: preferences.context
-        try {
-            val dir = java.io.File(ctx.filesDir, "analysis_history")
-            if (!dir.exists()) dir.mkdirs()
-            val file = java.io.File(dir, "analysis_${now.time}.jpg")
-            java.io.FileOutputStream(file).use { out ->
-                output.processedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-            }
-            capturedSavedPath = file.absolutePath
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        val qualityPassedInt = if (output.qualityResult.isPassed) 1 else 0
-
-        val historyEntity = AnalysisHistoryEntity(
-            timestamp = now.time,
-            dateFormatted = dateFmt,
-            timeFormatted = timeFmt,
-            imagePath = capturedSavedPath,
-            matchedSampleId = classification.nearestSampleId,
-            matchedSampleName = classification.nearestSampleName,
-            confidenceScorePct = classification.confidenceScorePct,
-            confidenceLevel = classification.confidenceLevel.name,
-            isUnknown = classification.isUnknown,
-            euclideanDistance = classification.topMatch.euclideanDistance,
-            manhattanDistance = classification.topMatch.deltaE00, // Store real Delta E00
-            cosineSimilarity = classification.topMatch.cosineSimilarity,
-            featureVectorJson = VectorFormat.serialize(
-                output.normalizedVector,
-                Triple(output.colorProfile.trimmedMeanL, output.colorProfile.trimmedMeanA, output.colorProfile.trimmedMeanB),
-                schema = 3
-            ),
-            qualityScore = output.qualityResult.overallScore,
-            processingTimeMs = classification.processingTimeMs,
-            batchId = batchId,
-            normalizationMethod = normMethod.name,
-            algorithmVersion = "v3.0.0",
-            matchedImagePath = matchedRef?.imagePath,
-            qualityPassed = qualityPassedInt,
-            estimatedReferenceLevel = classification.estimatedReferenceLevel
-        )
-
-        db.analysisHistoryDao().insert(historyEntity)
-
-        Pair(classification, output)
-    }
-
-    /**
-     * Re-calculates and updates reference sample features upon image update
-     */
     suspend fun updateReferenceSample(
         id: Int,
         name: String,
@@ -149,78 +270,172 @@ class AppRepository(
         operatorName: String = "Administrator",
         sourceType: String = "USER_IMAGE"
     ) = withContext(Dispatchers.IO) {
-        require(name.isNotBlank()) { "Reference name cannot be blank" }
-        require(icumsa > 0) { "Reference ICUMSA label must be positive" }
 
-        val existing = db.referenceSampleDao().getSampleById(id)
-        val newVersionNum = (existing?.version ?: 1) + 1
-
-        var savedPath = existing?.imagePath
-
-        val (newVectorJson, vectorSize) = if (newBitmap != null) {
-            // Validate image quality before accepting reference
-            val (cls, output) = pipeline.processImage(newBitmap, emptyList())
-            if (!output.qualityResult.isPassed) {
-                throw IllegalArgumentException("Reference update rejected: ${output.qualityResult.rejectionReason}")
-            }
-
-            if (context != null) {
-                try {
-                    val dir = java.io.File(context.filesDir, "reference_samples")
-                    if (!dir.exists()) dir.mkdirs()
-                    val file = java.io.File(dir, "sample_${id}.jpg")
-                    java.io.FileOutputStream(file).use { out ->
-                        newBitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
-                    }
-                    savedPath = file.absolutePath
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            val complete = output.completeFeatureSet
-            val lab = Triple(output.colorProfile.trimmedMeanL, output.colorProfile.trimmedMeanA, output.colorProfile.trimmedMeanB)
-            val json = VectorFormat.serialize(complete.concatenatedVector, lab, schema = 3)
-            Pair(json, complete.concatenatedVector.size)
-        } else {
-            Pair(existing?.featureVectorJson ?: "[]", existing?.featureVectorSize ?: 191)
+        require(name.isNotBlank()) {
+            "Reference name cannot be blank"
         }
 
-        val updatedEntity = ReferenceSampleEntity(
-            id = id,
+        require(icumsa > 0) {
+            "Reference ICUMSA label must be positive"
+        }
+
+        val sampleDao = db.referenceSampleDao()
+        val versionDao = db.referenceVersionDao()
+
+        val existing = sampleDao.getSampleById(id)
+            ?: throw IllegalArgumentException(
+                "Reference sample #$id was not found"
+            )
+
+        val now = System.currentTimeMillis()
+        val newVersion = existing.version + 1
+
+        var newVectorJson = existing.featureVectorJson
+        var newVectorSize = existing.featureVectorSize
+        var savedImagePath = existing.imagePath
+
+        if (newBitmap != null) {
+
+            val (_, output) = pipeline.processImage(
+                originalBitmap = newBitmap,
+                referenceSamples = emptyList()
+            )
+
+            try {
+
+                if (!output.qualityResult.isPassed) {
+                    throw IllegalArgumentException(
+                        "Reference update rejected: " +
+                            (output.qualityResult.rejectionReason
+                                ?: "Image quality validation failed")
+                    )
+                }
+
+                val rawVector =
+                    output.completeFeatureSet.concatenatedVector
+
+                require(
+                    rawVector.size == FeatureSchema.FEATURE_VECTOR_SIZE
+                ) {
+                    "Extracted vector has ${rawVector.size} dimensions; " +
+                        "expected ${FeatureSchema.FEATURE_VECTOR_SIZE}"
+                }
+
+                require(rawVector.all { it.isFinite() }) {
+                    "Extracted reference vector contains invalid values"
+                }
+
+                newVectorJson = VectorFormat.serialize(
+                    vector = rawVector,
+                    lab = output.completeFeatureSet.labMeans,
+                    schema = FeatureSchema.SCHEMA_VERSION
+                )
+
+                newVectorSize = rawVector.size
+
+            } finally {
+
+                // Release temporary processing-stage bitmaps.
+                output.stages.forEach { stage ->
+                    if (!stage.bitmap.isRecycled) {
+                        stage.bitmap.recycle()
+                    }
+                }
+            }
+
+            // Save the new original reference image.
+            val appContext = context
+                ?: throw IllegalStateException(
+                    "Application context is required to save a reference image"
+                )
+
+            val directory = File(
+                appContext.filesDir,
+                "reference_samples"
+            )
+
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw IllegalStateException(
+                    "Cannot create reference image directory"
+                )
+            }
+
+            val imageFile = File(
+                directory,
+                "sample_${id}_${now}.jpg"
+            )
+
+            FileOutputStream(imageFile).use { stream ->
+                val saved = newBitmap.compress(
+                    Bitmap.CompressFormat.JPEG,
+                    92,
+                    stream
+                )
+
+                if (!saved) {
+                    throw IllegalStateException(
+                        "Failed to compress reference image"
+                    )
+                }
+            }
+
+            savedImagePath = imageFile.absolutePath
+        }
+
+        // Copy preserves fields that are not being changed,
+        // including any existing LAB metadata.
+        val updatedEntity = existing.copy(
             name = name,
             icumsaValue = icumsa,
             description = description,
             featureVectorJson = newVectorJson,
-            imagePath = savedPath,
-            version = newVersionNum,
-            lastModifiedTimestamp = System.currentTimeMillis(),
+            imagePath = savedImagePath,
+            version = newVersion,
+            lastModifiedTimestamp = now,
             lastModifiedBy = operatorName,
-            featureVectorSize = vectorSize,
-            source = sourceType,
-            featureSchemaVersion = 3
+            featureVectorSize = newVectorSize
         )
 
-        db.referenceSampleDao().insertOrUpdate(updatedEntity)
+        sampleDao.insertOrUpdate(updatedEntity)
 
-        // Log version history
-        db.referenceVersionDao().insertVersion(
+        // Keep reference version history.
+        versionDao.insertVersion(
             ReferenceVersionEntity(
                 sampleId = id,
-                versionNumber = newVersionNum,
+                versionNumber = newVersion,
                 name = name,
                 icumsaValue = icumsa,
                 description = description,
                 featureVectorJson = newVectorJson,
-                imagePath = savedPath,
+                imagePath = savedImagePath,
+                timestamp = now,
                 operatorName = operatorName,
-                changeDescription = "Updated reference sample image & re-extracted features (v3)"
+                changeDescription =
+                    if (newBitmap != null) {
+                        "Reference image and 63-dimensional features updated. Source: $sourceType"
+                    } else {
+                        "Reference metadata updated. Existing image and features preserved."
+                    }
             )
         )
     }
 
-    suspend fun getReferenceVersions(sampleId: Int) = db.referenceVersionDao().getVersionsForSample(sampleId)
+    // --------------------------------------------------
+    // REFERENCE VERSION HISTORY
+    // --------------------------------------------------
 
-    suspend fun toggleFavoriteHistory(id: Long, isFavorite: Boolean) {
+    suspend fun getReferenceVersions(
+        sampleId: Int
+    ) = db.referenceVersionDao().getVersionsForSample(sampleId)
+
+    // --------------------------------------------------
+    // HISTORY MANAGEMENT
+    // --------------------------------------------------
+
+    suspend fun toggleFavoriteHistory(
+        id: Long,
+        isFavorite: Boolean
+    ) {
         db.analysisHistoryDao().setFavorite(id, isFavorite)
     }
 
@@ -232,18 +447,47 @@ class AppRepository(
         db.analysisHistoryDao().deleteAll()
     }
 
-    suspend fun saveCalibrationProfile(profile: CalibrationProfileEntity) {
+    // --------------------------------------------------
+    // CALIBRATION
+    // --------------------------------------------------
+
+    suspend fun saveCalibrationProfile(
+        profile: CalibrationProfileEntity
+    ) {
         db.calibrationProfileDao().insert(profile)
     }
 
-    val subActivated: Flow<Boolean> = preferences.subActivatedFlow
-    val subStartTime: Flow<Long> = preferences.subStartTimeFlow
-    val subExpirationTime: Flow<Long> = preferences.subExpirationTimeFlow
-    val subDurationDays: Flow<Int> = preferences.subDurationDaysFlow
+    // --------------------------------------------------
+    // SUBSCRIPTION FLOWS
+    // --------------------------------------------------
+
+    val subActivated: Flow<Boolean> =
+        preferences.subActivatedFlow
+
+    val subStartTime: Flow<Long> =
+        preferences.subStartTimeFlow
+
+    val subExpirationTime: Flow<Long> =
+        preferences.subExpirationTimeFlow
+
+    val subDurationDays: Flow<Int> =
+        preferences.subDurationDaysFlow
+
+    // --------------------------------------------------
+    // ACTIVATE SUBSCRIPTION
+    // --------------------------------------------------
 
     suspend fun activateSubscription(durationDays: Int) {
+
+        require(durationDays > 0) {
+            "Subscription duration must be positive"
+        }
+
         val startTime = System.currentTimeMillis()
-        val expirationTime = startTime + (durationDays.toLong() * 24 * 3600 * 1000)
+
+        val expirationTime =
+            startTime + durationDays.toLong() * 24L * 3600L * 1000L
+
         preferences.setSubscriptionData(
             activated = true,
             startTime = startTime,
@@ -252,34 +496,81 @@ class AppRepository(
         )
     }
 
-    suspend fun extendSubscription(additionalDays: Int, currentExpTime: Long, currentDuration: Int) {
-        val startTime = System.currentTimeMillis()
-        val baseTime = if (currentExpTime > startTime) currentExpTime else startTime
-        val expirationTime = baseTime + (additionalDays.toLong() * 24 * 3600 * 1000)
+    // --------------------------------------------------
+    // EXTEND SUBSCRIPTION
+    // --------------------------------------------------
+
+    suspend fun extendSubscription(
+        additionalDays: Int,
+        currentExpTime: Long,
+        currentDuration: Int
+    ) {
+
+        require(additionalDays > 0) {
+            "Additional subscription days must be positive"
+        }
+
+        val now = System.currentTimeMillis()
+
+        val baseTime =
+            if (currentExpTime > now) currentExpTime else now
+
+        val expirationTime =
+            baseTime + additionalDays.toLong() * 24L * 3600L * 1000L
+
         preferences.setSubscriptionData(
             activated = true,
-            startTime = startTime,
+            startTime = now,
             expirationTime = expirationTime,
             durationDays = currentDuration + additionalDays
         )
     }
 
-    // Preferences setters
-    suspend fun setLanguage(lang: String) = preferences.setLanguage(lang)
-    suspend fun setTheme(theme: String) = preferences.setTheme(theme)
-    suspend fun setNormalization(method: String) = preferences.setNormalization(method)
-    suspend fun setSimilarityThreshold(threshold: Double) = preferences.setSimilarityThreshold(threshold)
-    suspend fun setDeveloperMode(enabled: Boolean) = preferences.setDeveloperMode(enabled)
-    suspend fun setSecurityPin(pin: String) = preferences.setSecurityPin(pin)
-    suspend fun setBiometricEnabled(enabled: Boolean) = preferences.setBiometricEnabled(enabled)
-    suspend fun setScreenshotProtected(protected: Boolean) = preferences.setScreenshotProtected(protected)
+    // --------------------------------------------------
+    // PREFERENCE SETTERS
+    // --------------------------------------------------
+
+    suspend fun setLanguage(lang: String) =
+        preferences.setLanguage(lang)
+
+    suspend fun setTheme(theme: String) =
+        preferences.setTheme(theme)
+
+    suspend fun setNormalization(method: String) =
+        preferences.setNormalization(method)
+
+    suspend fun setSimilarityThreshold(threshold: Double) =
+        preferences.setSimilarityThreshold(threshold)
+
+    suspend fun setDeveloperMode(enabled: Boolean) =
+        preferences.setDeveloperMode(enabled)
+
+    suspend fun setSecurityPin(pin: String) =
+        preferences.setSecurityPin(pin)
+
+    suspend fun setBiometricEnabled(enabled: Boolean) =
+        preferences.setBiometricEnabled(enabled)
+
+    suspend fun setScreenshotProtected(protected: Boolean) =
+        preferences.setScreenshotProtected(protected)
+
+    // --------------------------------------------------
+    // VECTOR JSON PARSER
+    // --------------------------------------------------
 
     fun parseVectorJson(json: String?): DoubleArray {
+
         if (json.isNullOrBlank()) {
-            throw IllegalArgumentException("Feature vector JSON string is empty")
+            throw IllegalArgumentException(
+                "Feature vector JSON string is empty"
+            )
         }
+
         val parsed = VectorFormat.parse(json)
-            ?: throw IllegalArgumentException("Invalid numeric token or corrupt feature vector JSON: $json")
+            ?: throw IllegalArgumentException(
+                "Invalid or corrupted feature vector"
+            )
+
         return parsed.vector
     }
 }
