@@ -1,3 +1,4 @@
+
 package com.example.data.export
 
 import android.content.Context
@@ -9,8 +10,8 @@ import android.os.Environment
 import androidx.core.content.FileProvider
 import com.example.cv.ClassificationResult
 import com.example.data.security.SecurityManager
+import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -20,245 +21,656 @@ class ExportManager(
     private val securityManager: SecurityManager = SecurityManager()
 ) {
 
-    private fun getPublicDownloadsDir(): File {
-        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        if (!downloads.exists()) downloads.mkdirs()
-        return downloads
-    }
+    private fun candidateDirectories(): List<File> {
+        val directories = mutableListOf<File>()
 
-    /**
-     * Exports classification result to PDF document
-     */
-    fun exportToPdf(result: ClassificationResult, operatorName: String = "Lab Specialist"): File {
-        val pdfDoc = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4
-        val page = pdfDoc.startPage(pageInfo)
-        val canvas = page.canvas
-
-        val paintTitle = Paint().apply {
-            color = Color.parseColor("#0F172A")
-            textSize = 20f
-            isFakeBoldText = true
-        }
-
-        val paintSubtitle = Paint().apply {
-            color = Color.parseColor("#0284C7")
-            textSize = 12f
-            isFakeBoldText = true
-        }
-
-        val paintText = Paint().apply {
-            color = Color.parseColor("#334155")
-            textSize = 11f
-        }
-
-        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-
-        canvas.drawText("CRYSTAL VISION - LABORATORY ANALYSIS REPORT", 40f, 50f, paintTitle)
-        canvas.drawText("Islamic Azad University, Hamedan Branch - Sugar ICUMSA Classifier", 40f, 70f, paintSubtitle)
-        canvas.drawLine(40f, 85f, 555f, 85f, paintText)
-
-        var y = 120f
-        canvas.drawText("Date & Time: $dateStr", 40f, y, paintText); y += 18f
-        canvas.drawText("Operator Name: $operatorName", 40f, y, paintText); y += 18f
-        canvas.drawText("Processing Time: ${result.processingTimeMs} ms", 40f, y, paintText); y += 24f
-
-        canvas.drawText("ICUMSA ESTIMATION (LAB-BASED INTERPOLATION):", 40f, y, paintSubtitle); y += 18f
-        val est = result.icumsaEstimation
-        if (est != null) {
-            val icumsaText = if (est.isOutOfRange) {
-                "ICUMSA: OUT OF REFERENCE RANGE (${est.outOfRangeReason ?: "Out of bounds"})"
-            } else if (est.isUnknown) {
-                "ICUMSA: UNKNOWN (Path Distance: ${String.format("%.2f", est.distanceToPath)} > Threshold)"
-            } else {
-                "Estimated ICUMSA: ${String.format("%.1f", est.estimatedIcumsa)} IU"
-            }
-            canvas.drawText(icumsaText, 60f, y, paintText); y += 16f
-            canvas.drawText(
-                "Reference Interval: [Ref ${est.selectedRef1.sampleId}: ${est.selectedRef1.icumsaValue} IU] -> [Ref ${est.selectedRef2.sampleId}: ${est.selectedRef2.icumsaValue} IU] (t = ${String.format("%.3f", est.relativePositionT)})",
-                60f, y, paintText
-            ); y += 16f
-            canvas.drawText(
-                "Sample Median LAB: L*=${String.format("%.2f", est.sampleLabMedian.medianL)}, a*=${String.format("%.2f", est.sampleLabMedian.medianA)}, b*=${String.format("%.2f", est.sampleLabMedian.medianB)}",
-                60f, y, paintText
-            ); y += 16f
-            canvas.drawText("Distance to Reference Path: ${String.format("%.2f", est.distanceToPath)}", 60f, y, paintText); y += 24f
-        } else {
-            canvas.drawText("Estimated ICUMSA: Not available", 60f, y, paintText); y += 24f
-        }
-
-        canvas.drawText("PRIMARY 191-DIM CLASSIFICATION RESULT:", 40f, y, paintSubtitle); y += 18f
-        canvas.drawText("Nearest Reference Sample: ${result.nearestSampleName}", 60f, y, paintText); y += 16f
-        canvas.drawText("Confidence Score: ${String.format("%.2f", result.confidenceScorePct)}% (${result.confidenceLevel})", 60f, y, paintText); y += 16f
-        canvas.drawText("Is Unknown Sample: ${if (result.isUnknown) "YES" else "NO"}", 60f, y, paintText); y += 24f
-
-        canvas.drawText("SIMILARITY METRICS BREAKDOWN (REFERENCE SAMPLES):", 40f, y, paintSubtitle); y += 18f
-        for (m in result.allMatches.take(6)) {
-            canvas.drawText(
-                "• ${m.sampleName}: Cosine=${String.format("%.1f", m.cosineSimilarityPct)}%, EucDist=${String.format("%.2f", m.euclideanDistance)}, Match=${String.format("%.1f", m.finalSimilarityPct)}%",
-                60f, y, paintText
+        try {
+            directories.add(
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
             )
-            y += 16f
+        } catch (_: Exception) {
         }
 
-        y += 30f
-        canvas.drawText("Signature & Lab Seal: _________________________", 40f, y, paintText)
-
-        pdfDoc.finishPage(page)
-
-        val fileName = "Analysis_Report_${System.currentTimeMillis()}.pdf"
-        val file = try {
-            File(getPublicDownloadsDir(), fileName)
-        } catch (e: Exception) {
-            File(context.cacheDir, fileName)
+        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let {
+            directories.add(it)
         }
 
-        FileOutputStream(file).use { pdfDoc.writeTo(it) }
-        pdfDoc.close()
-        return file
+        directories.add(context.cacheDir)
+
+        return directories.distinctBy { it.absolutePath }
     }
 
-    /**
-     * Exports result to CSV format
-     */
-    fun exportToCsv(results: List<ClassificationResult>): File {
-        val fileName = "Sugar_Analysis_Export_${System.currentTimeMillis()}.csv"
-        val file = try {
-            File(getPublicDownloadsDir(), fileName)
-        } catch (e: Exception) {
-            File(context.cacheDir, fileName)
-        }
+    private fun saveBytes(
+        fileName: String,
+        content: ByteArray
+    ): File {
 
-        val sb = StringBuilder()
-        // UTF-8 BOM for Persian and Excel compatibility
-        sb.append("\uFEFF")
-        sb.append("Timestamp,Matched Sample,Estimated ICUMSA,Ref1 (ID/ICUMSA),Ref2 (ID/ICUMSA),Interpolation t,Median L*,Median a*,Median b*,Path Distance,Confidence Score (%),Confidence Level,Unknown,Out Of Range,Processing Time (ms)\n")
+        var lastError: Exception? = null
 
-        val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        for (r in results) {
-            val tsStr = dateFmt.format(Date())
-            val est = r.icumsaEstimation
-            val estVal = if (est != null) String.format(Locale.US, "%.1f", est.estimatedIcumsa) else "N/A"
-            val ref1Str = if (est != null) "Ref ${est.selectedRef1.sampleId} (${est.selectedRef1.icumsaValue})" else "N/A"
-            val ref2Str = if (est != null) "Ref ${est.selectedRef2.sampleId} (${est.selectedRef2.icumsaValue})" else "N/A"
-            val tStr = if (est != null) String.format(Locale.US, "%.3f", est.relativePositionT) else "N/A"
-            val medL = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianL) else "0.0"
-            val medA = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianA) else "0.0"
-            val medB = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianB) else "0.0"
-            val pathDist = if (est != null) String.format(Locale.US, "%.2f", est.distanceToPath) else "0.0"
-            val outOfRange = est?.isOutOfRange ?: false
+        for (directory in candidateDirectories()) {
+            try {
+                if (!directory.exists() && !directory.mkdirs()) {
+                    throw IllegalStateException(
+                        "Cannot create directory: ${directory.absolutePath}"
+                    )
+                }
 
-            sb.append("$tsStr,\"${r.nearestSampleName}\",$estVal,\"$ref1Str\",\"$ref2Str\",$tStr,$medL,$medA,$medB,$pathDist,${String.format(Locale.US, "%.2f", r.confidenceScorePct)},${r.confidenceLevel},${r.isUnknown},$outOfRange,${r.processingTimeMs}\n")
-        }
+                if (!directory.isDirectory || !directory.canWrite()) {
+                    continue
+                }
 
-        file.writeText(sb.toString())
-        return file
-    }
+                val file = File(directory, fileName)
+                file.writeBytes(content)
 
-    /**
-     * Exports result to Excel format (.csv table compatible with MS Excel)
-     */
-    fun exportToExcel(results: List<ClassificationResult>): File {
-        val fileName = "Sugar_Analysis_Excel_${System.currentTimeMillis()}.csv"
-        val file = try {
-            File(getPublicDownloadsDir(), fileName)
-        } catch (e: Exception) {
-            File(context.cacheDir, fileName)
-        }
+                return file
 
-        val sb = StringBuilder()
-        sb.append("\uFEFF")
-        sb.append("تاریخ و زمان,نمونه منطبق شده,مقدار تخمینی ICUMSA,مرجع ۱,مرجع ۲,موقعیت نسبی t,میانه L*,میانه a*,میانه b*,فاصله تا مسیر مرجع,درصد اطمینان,سطح اطمینان,وضعیت ناشناخته,خارج از محدوده,زمان پردازش (میلی ثانیه)\n")
-
-        val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        for (r in results) {
-            val tsStr = dateFmt.format(Date())
-            val est = r.icumsaEstimation
-            val estVal = if (est != null) String.format(Locale.US, "%.1f", est.estimatedIcumsa) else "نامشخص"
-            val ref1Str = if (est != null) "مرجع ${est.selectedRef1.sampleId} (${est.selectedRef1.icumsaValue})" else "-"
-            val ref2Str = if (est != null) "مرجع ${est.selectedRef2.sampleId} (${est.selectedRef2.icumsaValue})" else "-"
-            val tStr = if (est != null) String.format(Locale.US, "%.3f", est.relativePositionT) else "-"
-            val medL = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianL) else "-"
-            val medA = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianA) else "-"
-            val medB = if (est != null) String.format(Locale.US, "%.2f", est.sampleLabMedian.medianB) else "-"
-            val pathDist = if (est != null) String.format(Locale.US, "%.2f", est.distanceToPath) else "-"
-            val outOfRange = if (est?.isOutOfRange == true) "بله" else "خیر"
-            val unknownStr = if (r.isUnknown) "بله" else "خیر"
-
-            sb.append("$tsStr,\"${r.nearestSampleName}\",$estVal,\"$ref1Str\",\"$ref2Str\",$tStr,$medL,$medA,$medB,$pathDist,${String.format(Locale.US, "%.2f", r.confidenceScorePct)}%,${r.confidenceLevel},$unknownStr,$outOfRange,${r.processingTimeMs}\n")
-        }
-
-        file.writeText(sb.toString())
-        return file
-    }
-
-    /**
-     * Exports result to encrypted JSON payload
-     */
-    fun exportToEncryptedJson(results: List<ClassificationResult>): File {
-        val file = File(context.cacheDir, "Encrypted_Analysis_${System.currentTimeMillis()}.json.enc")
-        val sb = StringBuilder()
-        sb.append("[\n")
-        for ((idx, r) in results.withIndex()) {
-            val est = r.icumsaEstimation
-            sb.append("  {\n")
-            sb.append("    \"matchedSample\": \"${r.nearestSampleName}\",\n")
-            sb.append("    \"confidence\": ${r.confidenceScorePct},\n")
-            sb.append("    \"processingMs\": ${r.processingTimeMs},\n")
-            if (est != null) {
-                sb.append("    \"estimatedIcumsa\": ${est.estimatedIcumsa},\n")
-                sb.append("    \"ref1Id\": ${est.selectedRef1.sampleId},\n")
-                sb.append("    \"ref1Icumsa\": ${est.selectedRef1.icumsaValue},\n")
-                sb.append("    \"ref2Id\": ${est.selectedRef2.sampleId},\n")
-                sb.append("    \"ref2Icumsa\": ${est.selectedRef2.icumsaValue},\n")
-                sb.append("    \"sampleMedianL\": ${est.sampleLabMedian.medianL},\n")
-                sb.append("    \"sampleMedianA\": ${est.sampleLabMedian.medianA},\n")
-                sb.append("    \"sampleMedianB\": ${est.sampleLabMedian.medianB},\n")
-                sb.append("    \"distanceToPath\": ${est.distanceToPath},\n")
-                sb.append("    \"isOutOfRange\": ${est.isOutOfRange},\n")
+            } catch (e: Exception) {
+                lastError = e
             }
-            sb.append("    \"isUnknown\": ${r.isUnknown}\n")
-            sb.append("  }${if (idx < results.size - 1) "," else ""}\n")
         }
+
+        throw IllegalStateException(
+            "Unable to save exported file.",
+            lastError
+        )
+    }
+
+    private fun csvEscape(value: String): String {
+        return "\"" + value.replace("\"", "\"\"") + "\""
+    }
+
+    private fun number(
+        value: Double,
+        decimals: Int = 2
+    ): String {
+        return String.format(
+            Locale.US,
+            "%.${decimals}f",
+            value
+        )
+    }
+
+    /**
+     * Exports the current classification result as a PDF.
+     *
+     * This report does not claim to calculate a laboratory
+     * ICUMSA value. It reports classification and similarity.
+     */
+    fun exportToPdf(
+        result: ClassificationResult,
+        operatorName: String = "Lab Specialist"
+    ): File {
+
+        val pdf = PdfDocument()
+
+        try {
+            val titlePaint = Paint().apply {
+                color = Color.rgb(15, 23, 42)
+                textSize = 19f
+                isFakeBoldText = true
+                isAntiAlias = true
+            }
+
+            val subtitlePaint = Paint().apply {
+                color = Color.rgb(2, 132, 199)
+                textSize = 12f
+                isFakeBoldText = true
+                isAntiAlias = true
+            }
+
+            val bodyPaint = Paint().apply {
+                color = Color.rgb(51, 65, 85)
+                textSize = 10f
+                isAntiAlias = true
+            }
+
+            val dateText = SimpleDateFormat(
+                "yyyy-MM-dd HH:mm:ss",
+                Locale.US
+            ).format(Date())
+
+            val lines = mutableListOf<Pair<String, Paint>>()
+
+            lines.add(
+                "CRYSTAL VISION - ANALYSIS REPORT" to titlePaint
+            )
+
+            lines.add(
+                "Islamic Azad University, Hamedan Branch" to subtitlePaint
+            )
+
+            lines.add(
+                "Sugar Color Classification System" to bodyPaint
+            )
+
+            lines.add(
+                "----------------------------------------" to bodyPaint
+            )
+
+            lines.add("Export Date: $dateText" to bodyPaint)
+            lines.add("Operator: $operatorName" to bodyPaint)
+            lines.add(
+                "Processing Time: ${result.processingTimeMs} ms" to bodyPaint
+            )
+
+            lines.add(
+                "CLASSIFICATION RESULT" to subtitlePaint
+            )
+
+            lines.add(
+                "Nearest Reference: ${result.nearestSampleName}" to bodyPaint
+            )
+
+            lines.add(
+                "Reference ID: ${result.nearestSampleId}" to bodyPaint
+            )
+
+            lines.add(
+                "Reference ICUMSA Label: ${result.topMatch.icumsaValue}" to bodyPaint
+            )
+
+            lines.add(
+                "Note: Reference label, not a measured ICUMSA result." to bodyPaint
+            )
+
+            lines.add(
+                "Confidence: ${number(result.confidenceScorePct)}%" to bodyPaint
+            )
+
+            lines.add(
+                "Confidence Level: ${result.confidenceLevel.name}" to bodyPaint
+            )
+
+            lines.add(
+                "Unknown Sample: ${result.isUnknown}" to bodyPaint
+            )
+
+            lines.add(
+                "Classifiable: ${result.isClassifiable}" to bodyPaint
+            )
+
+            lines.add(
+                "Threshold: ${number(result.thresholdUsed)}%" to bodyPaint
+            )
+
+            lines.add(
+                "Margin: ${number(result.marginPct)}%" to bodyPaint
+            )
+
+            lines.add(
+                "SIMILARITY METRICS" to subtitlePaint
+            )
+
+            lines.add(
+                "Euclidean Distance: ${number(result.topMatch.euclideanDistance, 4)}" to bodyPaint
+            )
+
+            lines.add(
+                "Cosine Similarity: ${number(result.topMatch.cosineSimilarity, 4)}" to bodyPaint
+            )
+
+            lines.add(
+                "Cosine Match: ${number(result.topMatch.cosineSimilarityPct)}%" to bodyPaint
+            )
+
+            lines.add(
+                "Final Similarity: ${number(result.topMatch.finalSimilarityPct)}%" to bodyPaint
+            )
+
+            lines.add(
+                "REFERENCE MATCHES" to subtitlePaint
+            )
+
+            for (match in result.allMatches.take(10)) {
+
+                lines.add(
+                    "${match.sampleName} | ICUMSA Label: ${match.icumsaValue}" to bodyPaint
+                )
+
+                lines.add(
+                    "Euclidean: ${number(match.euclideanDistance, 4)} | " +
+                        "Cosine: ${number(match.cosineSimilarityPct)}% | " +
+                        "Match: ${number(match.finalSimilarityPct)}%" to bodyPaint
+                )
+            }
+
+            lines.add(
+                "----------------------------------------" to bodyPaint
+            )
+
+            lines.add(
+                "This report is an image-based classification report." to bodyPaint
+            )
+
+            lines.add(
+                "It is not a certified laboratory ICUMSA measurement." to bodyPaint
+            )
+
+            var pageNumber = 1
+
+            var page = pdf.startPage(
+                PdfDocument.PageInfo.Builder(
+                    595,
+                    842,
+                    pageNumber
+                ).create()
+            )
+
+            var canvas = page.canvas
+            var y = 50f
+
+            for ((text, paint) in lines) {
+
+                if (y > 800f) {
+
+                    pdf.finishPage(page)
+
+                    pageNumber++
+
+                    page = pdf.startPage(
+                        PdfDocument.PageInfo.Builder(
+                            595,
+                            842,
+                            pageNumber
+                        ).create()
+                    )
+
+                    canvas = page.canvas
+                    y = 50f
+                }
+
+                canvas.drawText(
+                    text.take(100),
+                    40f,
+                    y,
+                    paint
+                )
+
+                y += if (paint === titlePaint) {
+                    28f
+                } else if (paint === subtitlePaint) {
+                    23f
+                } else {
+                    18f
+                }
+            }
+
+            pdf.finishPage(page)
+
+            val output = ByteArrayOutputStream()
+
+            pdf.writeTo(output)
+
+            val fileName =
+                "Crystal_Analysis_${System.currentTimeMillis()}.pdf"
+
+            return saveBytes(
+                fileName,
+                output.toByteArray()
+            )
+
+        } finally {
+            pdf.close()
+        }
+    }
+
+    /**
+     * Builds CSV content using the current classification model.
+     */
+    private fun buildCsv(
+        results: List<ClassificationResult>,
+        persian: Boolean
+    ): String {
+
+        val dateText = SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss",
+            Locale.US
+        ).format(Date())
+
+        val headers = if (persian) {
+            listOf(
+                "زمان خروجی",
+                "شناسه نمونه مرجع",
+                "نام نمونه مرجع",
+                "برچسب ICUMSA مرجع",
+                "درصد اطمینان",
+                "سطح اطمینان",
+                "نمونه ناشناخته",
+                "قابل طبقه‌بندی",
+                "آستانه شباهت",
+                "حاشیه اطمینان",
+                "فاصله اقلیدسی",
+                "شباهت کسینوسی",
+                "درصد تطابق کسینوسی",
+                "درصد شباهت نهایی",
+                "زمان پردازش"
+            )
+        } else {
+            listOf(
+                "Export Date",
+                "Reference ID",
+                "Reference Sample",
+                "Reference ICUMSA Label (Not Estimate)",
+                "Confidence Score",
+                "Confidence Level",
+                "Unknown Sample",
+                "Classifiable",
+                "Threshold",
+                "Margin",
+                "Euclidean Distance",
+                "Cosine Similarity",
+                "Cosine Match Percent",
+                "Final Similarity Percent",
+                "Processing Time (ms)"
+            )
+        }
+
+        val sb = StringBuilder()
+
+        // UTF-8 BOM for Persian and Excel compatibility.
+        sb.append("\uFEFF")
+
+        sb.append(
+            headers.joinToString(",") { csvEscape(it) }
+        )
+
+        sb.append("\n")
+
+        for (result in results) {
+
+            val values = listOf(
+                dateText,
+                result.nearestSampleId.toString(),
+                result.nearestSampleName,
+                result.topMatch.icumsaValue.toString(),
+                number(result.confidenceScorePct),
+                result.confidenceLevel.name,
+                result.isUnknown.toString(),
+                result.isClassifiable.toString(),
+                number(result.thresholdUsed),
+                number(result.marginPct),
+                number(result.topMatch.euclideanDistance, 4),
+                number(result.topMatch.cosineSimilarity, 4),
+                number(result.topMatch.cosineSimilarityPct),
+                number(result.topMatch.finalSimilarityPct),
+                result.processingTimeMs.toString()
+            )
+
+            sb.append(
+                values.joinToString(",") {
+                    csvEscape(it)
+                }
+            )
+
+            sb.append("\n")
+        }
+
+        return sb.toString()
+    }
+
+    /**
+     * Exports result to English CSV.
+     */
+    fun exportToCsv(
+        results: List<ClassificationResult>
+    ): File {
+
+        val csv = buildCsv(
+            results = results,
+            persian = false
+        )
+
+        val fileName =
+            "Crystal_Analysis_${System.currentTimeMillis()}.csv"
+
+        return saveBytes(
+            fileName,
+            csv.toByteArray(Charsets.UTF_8)
+        )
+    }
+
+    /**
+     * Exports result to Persian CSV compatible with Excel.
+     *
+     * This is a CSV file, not a native XLSX workbook.
+     */
+    fun exportToExcel(
+        results: List<ClassificationResult>
+    ): File {
+
+        val csv = buildCsv(
+            results = results,
+            persian = true
+        )
+
+        val fileName =
+            "Crystal_Analysis_Excel_${System.currentTimeMillis()}.csv"
+
+        return saveBytes(
+            fileName,
+            csv.toByteArray(Charsets.UTF_8)
+        )
+    }
+
+    /**
+     * Escapes text for JSON strings.
+     */
+    private fun jsonEscape(value: String): String {
+
+        val escaped = value
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\b", "\\b")
+            .replace("\u000C", "\\f")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+
+        return "\"$escaped\""
+    }
+
+    /**
+     * Exports classification data as encrypted JSON.
+     */
+    fun exportToEncryptedJson(
+        results: List<ClassificationResult>
+    ): File {
+
+        val sb = StringBuilder()
+
+        sb.append("[\n")
+
+        for ((index, result) in results.withIndex()) {
+
+            sb.append("  {\n")
+
+            sb.append(
+                "    \"nearestSampleId\": ${result.nearestSampleId},\n"
+            )
+
+            sb.append(
+                "    \"nearestSampleName\": ${jsonEscape(result.nearestSampleName)},\n"
+            )
+
+            sb.append(
+                "    \"referenceIcumsaLabel\": ${result.topMatch.icumsaValue},\n"
+            )
+
+            sb.append(
+                "    \"confidenceScorePct\": ${result.confidenceScorePct},\n"
+            )
+
+            sb.append(
+                "    \"confidenceLevel\": ${jsonEscape(result.confidenceLevel.name)},\n"
+            )
+
+            sb.append(
+                "    \"isUnknown\": ${result.isUnknown},\n"
+            )
+
+            sb.append(
+                "    \"isClassifiable\": ${result.isClassifiable},\n"
+            )
+
+            sb.append(
+                "    \"thresholdUsed\": ${result.thresholdUsed},\n"
+            )
+
+            sb.append(
+                "    \"marginPct\": ${result.marginPct},\n"
+            )
+
+            sb.append(
+                "    \"processingTimeMs\": ${result.processingTimeMs},\n"
+            )
+
+            sb.append(
+                "    \"topMatch\": {\n"
+            )
+
+            sb.append(
+                "      \"euclideanDistance\": ${result.topMatch.euclideanDistance},\n"
+            )
+
+            sb.append(
+                "      \"cosineSimilarity\": ${result.topMatch.cosineSimilarity},\n"
+            )
+
+            sb.append(
+                "      \"cosineSimilarityPct\": ${result.topMatch.cosineSimilarityPct},\n"
+            )
+
+            sb.append(
+                "      \"finalSimilarityPct\": ${result.topMatch.finalSimilarityPct}\n"
+            )
+
+            sb.append("    },\n")
+
+            sb.append("    \"allMatches\": [\n")
+
+            for ((matchIndex, match) in result.allMatches.withIndex()) {
+
+                sb.append("      {\n")
+
+                sb.append(
+                    "        \"sampleName\": ${jsonEscape(match.sampleName)},\n"
+                )
+
+                sb.append(
+                    "        \"icumsaReferenceLabel\": ${match.icumsaValue},\n"
+                )
+
+                sb.append(
+                    "        \"euclideanDistance\": ${match.euclideanDistance},\n"
+                )
+
+                sb.append(
+                    "        \"cosineSimilarityPct\": ${match.cosineSimilarityPct},\n"
+                )
+
+                sb.append(
+                    "        \"finalSimilarityPct\": ${match.finalSimilarityPct}\n"
+                )
+
+                sb.append("      }")
+
+                if (matchIndex < result.allMatches.lastIndex) {
+                    sb.append(",")
+                }
+
+                sb.append("\n")
+            }
+
+            sb.append("    ]\n")
+
+            sb.append("  }")
+
+            if (index < results.lastIndex) {
+                sb.append(",")
+            }
+
+            sb.append("\n")
+        }
+
         sb.append("]")
 
-        val encrypted = securityManager.encryptString(sb.toString())
-        file.writeText(encrypted)
-        return file
+        val encrypted = securityManager.encryptString(
+            sb.toString()
+        )
+
+        val fileName =
+            "Crystal_Analysis_${System.currentTimeMillis()}.json.enc"
+
+        return saveBytes(
+            fileName,
+            encrypted.toByteArray(Charsets.UTF_8)
+        )
     }
 
     /**
-     * Opens an exported file in an external app
+     * Opens an exported file in an external application.
      */
-    fun openFile(file: File, mimeType: String) {
+    fun openFile(
+        file: File,
+        mimeType: String
+    ) {
         try {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+
+            val intent = Intent(
+                Intent.ACTION_VIEW
+            ).apply {
                 setDataAndType(uri, mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+
             context.startActivity(intent)
+
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     /**
-     * Shares an exported file via system chooser
+     * Shares an exported file through Android's share chooser.
      */
-    fun shareFile(file: File, mimeType: String) {
+    fun shareFile(
+        file: File,
+        mimeType: String
+    ) {
         try {
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val intent = Intent(Intent.ACTION_SEND).apply {
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+
+            val intent = Intent(
+                Intent.ACTION_SEND
+            ).apply {
                 type = mimeType
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val chooser = Intent.createChooser(intent, "اشتراک‌گذاری گزارش").apply {
+
+            val chooser = Intent.createChooser(
+                intent,
+                "اشتراک‌گذاری گزارش"
+            ).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+
             context.startActivity(chooser)
+
         } catch (e: Exception) {
             e.printStackTrace()
         }
