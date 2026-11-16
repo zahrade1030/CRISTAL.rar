@@ -9,6 +9,7 @@ import com.example.cv.*
 import com.example.data.db.*
 import com.example.data.preferences.AppPreferences
 import com.example.data.repository.AppRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -24,12 +25,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
             AppDatabase.ensureSamplesUpdated(application, db)
         }
     }
 
-    // UI States
+    // --------------------------------------------------
+    // UI STATES
+    // --------------------------------------------------
 
     val language = repository.languageFlow.stateIn(
         viewModelScope,
@@ -79,6 +82,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         false
     )
 
+    // --------------------------------------------------
+    // SUBSCRIPTION STATES
+    // --------------------------------------------------
+
     val subActivated = repository.subActivated.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
@@ -102,6 +109,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SharingStarted.WhileSubscribed(5000),
         30
     )
+
+    // --------------------------------------------------
+    // DATABASE STATES
+    // --------------------------------------------------
 
     val references = repository.allReferences.stateIn(
         viewModelScope,
@@ -127,12 +138,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         emptyList()
     )
 
-    // Active Capture & Analysis State
+    // --------------------------------------------------
+    // CURRENT IMAGE STATE
+    // --------------------------------------------------
 
     private val _currentBitmap = MutableStateFlow<Bitmap?>(null)
 
     val currentBitmap: StateFlow<Bitmap?> =
         _currentBitmap.asStateFlow()
+
+    // --------------------------------------------------
+    // CLASSIFICATION RESULT
+    // --------------------------------------------------
 
     private val _classificationResult =
         MutableStateFlow<ClassificationResult?>(null)
@@ -140,13 +157,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val classificationResult: StateFlow<ClassificationResult?> =
         _classificationResult.asStateFlow()
 
-    // PipelineOutput is nested inside OpenCvPipeline
+    // --------------------------------------------------
+    // PIPELINE OUTPUT
+    // PipelineOutput is a top-level data class in com.example.cv
+    // --------------------------------------------------
 
     private val _pipelineOutput =
-        MutableStateFlow<OpenCvPipeline.PipelineOutput?>(null)
+        MutableStateFlow<PipelineOutput?>(null)
 
-    val pipelineOutput: StateFlow<OpenCvPipeline.PipelineOutput?> =
+    val pipelineOutput: StateFlow<PipelineOutput?> =
         _pipelineOutput.asStateFlow()
+
+    // --------------------------------------------------
+    // ANALYSIS STATUS
+    // --------------------------------------------------
 
     private val _isAnalyzing = MutableStateFlow(false)
 
@@ -159,36 +183,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val analysisErrorMessage: StateFlow<String?> =
         _analysisErrorMessage.asStateFlow()
 
-    // Batch Analysis
+    // --------------------------------------------------
+    // BATCH ANALYSIS
+    // --------------------------------------------------
 
     private val _batchResults =
         MutableStateFlow<
-            List<Pair<ClassificationResult, OpenCvPipeline.PipelineOutput>>
+            List<Pair<ClassificationResult, PipelineOutput>>
         >(emptyList())
 
     val batchResults: StateFlow<
-        List<Pair<ClassificationResult, OpenCvPipeline.PipelineOutput>>
+        List<Pair<ClassificationResult, PipelineOutput>>
     > = _batchResults.asStateFlow()
 
-    // Capture bitmap
+    // --------------------------------------------------
+    // CAPTURE IMAGE
+    // --------------------------------------------------
 
     fun setCapturedBitmap(bitmap: Bitmap?) {
         _currentBitmap.value = bitmap
         _analysisErrorMessage.value = null
     }
 
-    // Analyze current bitmap
+    // --------------------------------------------------
+    // ANALYZE CURRENT IMAGE
+    // --------------------------------------------------
 
     fun analyzeCurrentBitmap() {
-        val bmp = _currentBitmap.value ?: return
+
+        val bitmap = _currentBitmap.value ?: return
 
         viewModelScope.launch {
+
             _isAnalyzing.value = true
             _analysisErrorMessage.value = null
 
             try {
+
                 val (classification, output) =
-                    repository.analyzeImage(bmp)
+                    repository.analyzeImage(bitmap)
 
                 if (!output.qualityResult.isPassed) {
                     _analysisErrorMessage.value =
@@ -202,22 +235,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _batchResults.value + Pair(classification, output)
 
             } catch (e: Exception) {
+
                 _analysisErrorMessage.value =
                     "خطا در پردازش تصویر: ${e.localizedMessage}"
 
             } finally {
+
                 _isAnalyzing.value = false
             }
         }
     }
 
-    // Clear batch results
+    // --------------------------------------------------
+    // CLEAR BATCH RESULTS
+    // --------------------------------------------------
 
     fun clearBatch() {
         _batchResults.value = emptyList()
     }
 
-    // Update reference sample
+    // --------------------------------------------------
+    // UPDATE REFERENCE SAMPLE
+    // --------------------------------------------------
 
     fun updateReferenceSample(
         id: Int,
@@ -226,6 +265,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         description: String,
         newBitmap: Bitmap?
     ) {
+
         viewModelScope.launch {
 
             if (
@@ -234,12 +274,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 icumsa > Int.MAX_VALUE.toDouble() ||
                 icumsa % 1.0 != 0.0
             ) {
+
                 _analysisErrorMessage.value =
                     "مقدار ICUMSA باید عدد صحیح و بزرگ‌تر از صفر باشد."
+
                 return@launch
             }
 
             try {
+
                 repository.updateReferenceSample(
                     id = id,
                     name = name,
@@ -251,13 +294,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _analysisErrorMessage.value = null
 
             } catch (e: Exception) {
+
                 _analysisErrorMessage.value =
                     "خطا در به‌روزرسانی نمونه مرجع: ${e.localizedMessage}"
             }
         }
     }
 
-    // History
+    // --------------------------------------------------
+    // HISTORY MANAGEMENT
+    // --------------------------------------------------
 
     fun toggleFavorite(id: Long, isFav: Boolean) {
         viewModelScope.launch {
@@ -277,7 +323,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Calibration
+    // --------------------------------------------------
+    // CALIBRATION
+    // --------------------------------------------------
 
     fun saveCalibration(profile: CalibrationProfileEntity) {
         viewModelScope.launch {
@@ -285,7 +333,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Preferences
+    // --------------------------------------------------
+    // SETTINGS
+    // --------------------------------------------------
 
     fun setLanguage(lang: String) =
         viewModelScope.launch {
@@ -302,9 +352,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.setNormalization(method)
         }
 
-    fun setSimilarityThreshold(thresh: Double) =
+    fun setSimilarityThreshold(threshold: Double) =
         viewModelScope.launch {
-            repository.setSimilarityThreshold(thresh)
+            repository.setSimilarityThreshold(threshold)
         }
 
     fun setDeveloperMode(enabled: Boolean) =
@@ -327,8 +377,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.setScreenshotProtected(protected)
         }
 
-    // Subscription password verification
-    // Must be connected to secure credential storage before activation is enabled.
+    // --------------------------------------------------
+    // SUBSCRIPTION PASSWORD
+    // --------------------------------------------------
+
+    // Subscription password verification is disabled
+    // until secure credential validation is implemented.
 
     fun verifySubscriptionPasswords(
         pass1: String,
@@ -337,15 +391,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
 
-    // Subscription
+    // --------------------------------------------------
+    // ACTIVATE SUBSCRIPTION
+    // --------------------------------------------------
 
     fun activateSubscription(days: Int) =
         viewModelScope.launch {
+
+            if (days <= 0) {
+                return@launch
+            }
+
             repository.activateSubscription(days)
         }
 
+    // --------------------------------------------------
+    // EXTEND SUBSCRIPTION
+    // --------------------------------------------------
+
     fun extendSubscription(days: Int) =
         viewModelScope.launch {
+
+            if (days <= 0) {
+                return@launch
+            }
+
             repository.extendSubscription(
                 days,
                 subExpirationTime.value,
@@ -353,14 +423,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
+    // --------------------------------------------------
+    // CHECK SUBSCRIPTION VALIDITY
+    // --------------------------------------------------
+
     fun isSubscriptionValid(): Boolean {
+
         return subActivated.value &&
             System.currentTimeMillis() < subExpirationTime.value
     }
 
-    // Admin PIN
+    // --------------------------------------------------
+    // ADMIN PIN VERIFICATION
+    // --------------------------------------------------
 
     fun verifyAdminPin(enteredPin: String): Boolean {
+
         return enteredPin.isNotBlank() &&
             enteredPin == securityPin.value
     }
